@@ -1,0 +1,10 @@
+[Unit]
+Description=System-Updates dienstags 09:45
+
+[Timer]
+OnCalendar=Tue *-*-* 09:45:00
+# Pi war zu der Zeit aus -> nicht nachholen (sonst Update direkt beim Einschalten)
+Persistent=false
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=raspy Kiosk
+Comment=Stundenplan im Vollbild (Tab 1: /heute, Tab 2: Wochenplan)
+Exec=@DIR@/device/kiosk.sh
+X-GNOME-Autostart-enabled=true
+NoDisplay=false

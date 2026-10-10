@@ -1,0 +1,14 @@
+[Unit]
+Description=raspy – Lüftersteuerung + Überhitzungsschutz
+After=multi-user.target
+
+[Service]
+User=@USER@
+ExecStart=/usr/bin/python3 @DIR@/device/thermal_guard.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

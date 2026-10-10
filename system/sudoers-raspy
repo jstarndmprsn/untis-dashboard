@@ -1,0 +1,2 @@
+# raspy: Tasten und Überhitzungsschutz dürfen ausschalten und laufende Updates sicher beenden
+@USER@ ALL=(root) NOPASSWD: /usr/sbin/shutdown, /usr/bin/systemctl stop raspy-update.service

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="de" translate="no">
+<head>
+<meta charset="UTF-8">
+<meta name="google" content="notranslate">
+<title>System</title>
+<link rel="stylesheet" href="/static/thermal.css?v=1">
+</head>
+<body>
+<div class="bg"></div>
+<main class="wrap">
+  <header class="top">
+    <div class="top-left">
+      <h1>System</h1>
+      <span id="status" class="pill"></span>
+    </div>
+    <div class="top-right">
+      <span class="hint">Tab-Taste drücken zum Schließen</span>
+      <span id="clock" class="clock"></span>
+    </div>
+  </header>
+
+  <section class="tiles">
+    <div class="tile"><div class="t-label">CPU-Temperatur</div><div class="t-value" id="v-temp">–</div><div class="t-sub" id="s-temp"></div></div>
+    <div class="tile"><div class="t-label">Lüfter</div><div class="t-value" id="v-fan">–</div><div class="t-sub" id="s-fan"></div></div>
+    <div class="tile"><div class="t-label">CPU-Last</div><div class="t-value" id="v-cpu">–</div><div class="t-sub" id="s-cpu"></div></div>
+    <div class="tile"><div class="t-label">Arbeitsspeicher</div><div class="t-value" id="v-mem">–</div><div class="t-sub" id="s-mem"></div></div>
+  </section>
+
+  <section class="main">
+    <div class="charts">
+      <div class="chart"><div class="c-title">Temperatur <span>°C · letzte 15 min</span></div><svg id="c-temp"></svg></div>
+      <div class="chart"><div class="c-title">CPU-Last <span>% · letzte 15 min</span></div><svg id="c-cpu"></svg></div>
+      <div class="chart"><div class="c-title">Lüfter <span>U/min · letzte 15 min</span></div><svg id="c-rpm"></svg></div>
+    </div>
+    <aside class="side">
+      <div class="panel">
+        <div class="p-title">Kerne</div>
+        <div id="cores" class="cores"></div>
+      </div>
+      <div class="panel">
+        <div class="p-title">Prozesse <span>CPU %</span></div>
+        <div id="procs" class="procs"></div>
+      </div>
+      <div class="panel">
+        <div class="p-title">Schutz &amp; Hinweise</div>
+        <div id="notes" class="notes"></div>
+      </div>
+    </aside>
+  </section>
+</main>
+<script src="/static/thermal.js?v=2"></script>
+</body>
+</html>

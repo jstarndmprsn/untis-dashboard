@@ -1,0 +1,95 @@
+#!/bin/bash
+# Wöchentliche System-Updates im Hintergrund (raspy-update.timer: dienstags 09:45).
+# Auf dem Bildschirm ist nichts zu sehen; nur wer währenddessen ausschalten will,
+# bekommt von button.py den Hinweis "Updates laufen".
+#
+# Sicher abbrechbar:
+#   Download-Phase   -> sofort (apt-get update / Herunterladen darf man unterbrechen)
+#   Installation     -> Paket für Paket, abgebrochen wird nur ZWISCHEN zwei Paketen
+#   Abbruch anfordern: raspy-update --stop  (wartet, bis sicher beendet)
+#   Das macht systemd beim Stoppen des Dienstes (ExecStop), also auch beim Herunterfahren.
+#
+# Wird doch einmal mitten in einer Installation unterbrochen (Stromausfall,
+# Überhitzung), repariert raspy-update-recover.service das beim nächsten Start.
+#
+# Test ohne echte Änderungen: RASPY_UPDATE_SIMULATE=1 raspy-update
+
+set -u
+RUN=/run/raspy-update
+STOP=$RUN/stop
+STATE=$RUN/state
+INTERRUPTED=/var/lib/raspy-update/interrupted
+LOG=/var/log/raspy-update.log
+SIM=${RASPY_UPDATE_SIMULATE:-0}
+
+# ── Abbruch anfordern und warten (ExecStop des Dienstes) ──
+if [ "${1:-}" = "--stop" ]; then
+  [ -e "$STATE" ] || exit 0
+  touch "$STOP"
+  for _ in $(seq 1 110); do
+    [ -e "$STATE" ] || exit 0
+    sleep 1
+  done
+  exit 0      # danach beendet systemd die restlichen Prozesse
+fi
+
+export DEBIAN_FRONTEND=noninteractive
+APT=(apt-get -y -q -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
+[ "$SIM" = 1 ] && APT+=(-s)
+
+mkdir -p "$RUN" /var/lib/raspy-update
+rm -f "$STOP"
+exec >>"$LOG" 2>&1
+
+phase() { echo "$1" > "$STATE"; echo "--- $(date '+%T') Phase: $1"; }
+stopped() { [ -e "$STOP" ]; }
+finish() { rm -f "$STATE" "$STOP"; echo "=== $(date '+%F %T') Ende: $1"; exit 0; }
+
+# startet einen Befehl und bricht ihn ab, sobald ein Abbruch angefordert wird
+interruptible() {
+  "$@" &
+  local pid=$!
+  while kill -0 "$pid" 2>/dev/null; do
+    if stopped; then kill -INT "$pid" 2>/dev/null; wait "$pid"; return 130; fi
+    sleep 1
+  done
+  wait "$pid"
+}
+
+echo "=== $(date '+%F %T') Update startet$([ "$SIM" = 1 ] && echo ' (SIMULATION)')"
+
+# ── 1. Paketlisten + Download (jederzeit abbrechbar) ──
+phase download
+if [ "$SIM" = 1 ]; then
+  interruptible sleep 5
+else
+  interruptible apt-get -q update || echo "apt-get update meldete einen Fehler"
+fi
+stopped && finish "abgebrochen (Download)"
+[ "$SIM" = 1 ] || interruptible "${APT[@]}" -d full-upgrade || true
+stopped && finish "abgebrochen (Download)"
+
+# ── 2. Installation Paket für Paket (Abbruch nur zwischen zwei Paketen) ──
+mapfile -t PKGS < <(apt list --upgradable 2>/dev/null | awk -F/ 'NR > 1 { print $1 }')
+[ "$SIM" = 1 ] && [ ${#PKGS[@]} -eq 0 ] && PKGS=(test-paket-1 test-paket-2 test-paket-3 test-paket-4)
+echo "${#PKGS[@]} Pakete zu aktualisieren"
+[ ${#PKGS[@]} -eq 0 ] && finish "nichts zu tun"
+
+phase install
+touch "$INTERRUPTED"
+for p in "${PKGS[@]}"; do
+  if stopped; then
+    rm -f "$INTERRUPTED"
+    finish "sicher abgebrochen vor $p"
+  fi
+  echo "--- $(date '+%T') $p"
+  if [ "$SIM" = 1 ]; then sleep 4; else "${APT[@]}" install --only-upgrade "$p"; fi
+done
+
+# Rest (neue Abhängigkeiten, z. B. bei Kernel-Updates) und aufräumen
+if ! stopped && [ "$SIM" != 1 ]; then
+  "${APT[@]}" full-upgrade
+  apt-get -q autoclean
+fi
+rm -f "$INTERRUPTED"
+finish "fertig"

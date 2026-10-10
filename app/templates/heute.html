@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="de" translate="no">
+<head>
+<meta charset="UTF-8">
+<meta name="google" content="notranslate">
+<title>Heute · lädt</title>
+<link rel="stylesheet" href="/static/heute.css?v=4">
+</head>
+<body class="{{ '' if calendar else 'no-calendar' }}">
+<div class="bg"></div>
+<main class="grid">
+
+  <!-- Spalte 1: Kopf + Stunden -->
+  <section class="col col-lessons">
+    <header class="head">
+      <div class="head-line">
+        <span id="clock" class="clock">--:--</span>
+        <span id="temp" class="temp"></span>
+        <span id="wicon" class="wicon"></span>
+      </div>
+      <div id="date" class="date"></div>
+      <div id="wmeta" class="wmeta"></div>
+    </header>
+    <h2 class="title"><span id="day-label">Stunden</span><span id="untis-stale" class="stale"></span></h2>
+    <div id="lessons" class="lessons"></div>
+  </section>
+
+  <!-- Spalte 2: Aufträge + Hausaufgaben (ohne Kalender auch Ordnungsdienst) -->
+  <section class="col col-tasks">
+    <h2 class="title title-top">Hausaufgaben &amp; Aufträge</h2>
+    <div id="tasks" class="tasks"></div>
+    {% if not calendar %}<div id="duty" class="duty"></div>{% endif %}
+  </section>
+{% if calendar %}
+  <!-- Spalte 3: Termine + Ordnungsdienst (nur mit Kalender, CALENDAR_ICS_URL) -->
+  <section class="col col-events">
+    <h2 class="title title-top">Nächste Termine<span id="cal-stale" class="stale"></span></h2>
+    <div id="events" class="events"></div>
+    <div id="duty" class="duty"></div>
+  </section>
+{% endif %}
+</main>
+
+<div id="status" class="status"></div>
+
+<script src="/static/heute.js?v=5"></script>
+</body>
+</html>

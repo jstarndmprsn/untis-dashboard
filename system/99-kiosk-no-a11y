@@ -1,0 +1,4 @@
+# Kiosk: Accessibility-Flag aus 00-rpi-vars wieder entfernen (Orca ist deaktiviert, spart CPU)
+# POSIX-sh-kompatibel, weil /usr/bin/chromium ein sh-Skript ist
+CHROMIUM_FLAGS=$(printf "%s" "$CHROMIUM_FLAGS" | sed "s/--force-renderer-accessibility//g")
+export CHROMIUM_FLAGS

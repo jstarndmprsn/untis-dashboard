@@ -1,0 +1,14 @@
+# Zugangsdaten – NIE einchecken
+config.env
+config.env.tmp
+.env
+*.env
+!config.example.env
+
+# lokal erzeugt
+venv/
+.install-state
+__pycache__/
+*.pyc
+boot/raspy/
+.DS_Store

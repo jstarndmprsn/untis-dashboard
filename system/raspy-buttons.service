@@ -1,0 +1,17 @@
+[Unit]
+Description=raspy – Tasten (GPIO)
+After=graphical.target
+
+[Service]
+User=@USER@
+WorkingDirectory=/tmp
+Environment=DISPLAY=:0
+Environment=GPIOZERO_PIN_FACTORY=lgpio
+# button.py wartet beim Start 15 s (Desktop/X muss erst laufen) – nicht entfernen
+ExecStart=/usr/bin/python3 @DIR@/device/button.py
+Restart=on-failure
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=graphical.target

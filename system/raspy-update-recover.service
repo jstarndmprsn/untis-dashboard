@@ -1,0 +1,13 @@
+[Unit]
+Description=Unterbrochenes System-Update reparieren
+ConditionPathExists=/var/lib/raspy-update/interrupted
+After=local-fs.target
+
+[Service]
+Type=oneshot
+Environment=DEBIAN_FRONTEND=noninteractive
+ExecStart=/bin/sh -c 'echo "=== $(date "+%%F %%T") Reparatur nach unterbrochenem Update" >> /var/log/raspy-update.log; dpkg --configure -a >> /var/log/raspy-update.log 2>&1; apt-get -y -q -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -f install >> /var/log/raspy-update.log 2>&1; rm -f /var/lib/raspy-update/interrupted'
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,13 @@
+[Unit]
+Description=raspy – Stundenplan-Webserver (Flask, Port aus config.env)
+After=network.target
+
+[Service]
+User=@USER@
+WorkingDirectory=@DIR@/app
+ExecStart=@DIR@/venv/bin/python @DIR@/app/server.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

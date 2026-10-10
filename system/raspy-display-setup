@@ -1,0 +1,21 @@
+#!/bin/sh
+# LightDM display-setup-script (läuft als root direkt nach dem Start von X, vor der Sitzung)
+#  1. Mauszeiger ausblenden/zur Seite, damit er beim Booten nicht auf dem Logo steht
+#  2. Boot-Animation im X fortsetzen, bis die Heute-Seite bereit ist (bootsplash_x.py)
+#  3. danach das ursprüngliche display-setup-script ausführen (von install.sh eingetragen)
+SPLASH=@DIR@/device/bootsplash_x.py
+ORIGINAL=@ORIG_SETUP@
+UPTIME=$(cut -d. -f1 /proc/uptime)
+
+if [ "$UPTIME" -lt 180 ] && [ -f "$SPLASH" ]; then
+  xsetroot -cursor /usr/local/share/raspy/blank.xbm /usr/local/share/raspy/blank.xbm 2>/dev/null || true
+  xdotool mousemove 1919 1079 2>/dev/null || true
+  rm -f /tmp/bootsplash_ready
+  setsid /usr/bin/python3 "$SPLASH" > /tmp/bootsplash.log 2>&1 < /dev/null &
+  # kurz warten, bis das Fenster steht – so blitzt der Desktop nie auf (max. 3 s)
+  i=0
+  while [ ! -e /tmp/bootsplash_ready ] && [ "$i" -lt 30 ]; do sleep 0.1; i=$((i + 1)); done
+fi
+
+[ -n "$ORIGINAL" ] && [ -x "$ORIGINAL" ] && exec "$ORIGINAL"
+exit 0

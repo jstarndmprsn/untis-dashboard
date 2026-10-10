@@ -1,0 +1,6 @@
+flask>=3.0
+requests>=2.31
+icalendar>=5.0
+recurring-ical-events>=2.1
+psutil>=5.9
+pillow>=10.0   # nur für boot/make_frames.py (Boot-Animation)

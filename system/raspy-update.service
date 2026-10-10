@@ -1,0 +1,14 @@
+[Unit]
+Description=Woechentliche System-Updates (im Hintergrund)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+# Typ exec (nicht oneshot), damit ExecStop beim Stoppen/Herunterfahren greift:
+# es fordert den sicheren Abbruch an und wartet, bis das aktuelle Paket fertig ist.
+Type=exec
+ExecStart=/usr/local/sbin/raspy-update
+ExecStop=/usr/local/sbin/raspy-update --stop
+TimeoutStopSec=120
+Nice=15
+IOSchedulingClass=idle
