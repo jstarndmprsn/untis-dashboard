@@ -75,7 +75,8 @@ class UntisClient:
         r = self.s.get(f"{self.base}{path}", params=params, timeout=20,
                        headers={"Authorization": f"Bearer {self._token}"})
         r.raise_for_status()
-        return r.json().get("data", {})
+        j = r.json()
+        return j["data"] if "data" in j else j   # neuere Endpunkte haben keine "data"-Hülle
 
 
 def connect(cfg):
@@ -110,6 +111,16 @@ def timegrid(units):
     return out or None
 
 
+def subject_colors(subjects):
+    """getSubjects -> {Fachname: "#rrggbb"} – die Farben, die die Schule in Untis eingetragen hat."""
+    out = {}
+    for s in subjects:
+        c = (s.get("backColor") or "").strip().lstrip("#")
+        if s.get("name") and len(c) == 6 and all(ch in "0123456789abcdefABCDEF" for ch in c):
+            out[s["name"]] = "#" + c.lower()
+    return out
+
+
 class MasterData:
     """Stammdaten, geteilt von Wochen- und Tagesansicht."""
 
@@ -118,6 +129,7 @@ class MasterData:
         self.lock = threading.Lock()
         self.loaded_at = 0
         self.teachers, self.rooms, self.subjects = {}, {}, {}
+        self.colors = {}      # Fachname -> offizielle Farbe aus Untis ("#rrggbb")
         self.class_id, self.class_name, self.periods = None, None, None
 
     def invalidate(self):
@@ -129,7 +141,9 @@ class MasterData:
                 return self
             self.teachers = self._names(u, "getTeachers")
             self.rooms = self._names(u, "getRooms")
-            self.subjects = self._names(u, "getSubjects")
+            subjects = self._list(u, "getSubjects")
+            self.subjects = {x["id"]: x["name"] for x in subjects}
+            self.colors = subject_colors(subjects)
             self.class_id, self.class_name = self._class(u)
             try:
                 self.periods = timegrid(u.rpc("getTimegridUnits", {}))
@@ -140,12 +154,16 @@ class MasterData:
             return self
 
     @staticmethod
-    def _names(u, method):
+    def _list(u, method):
         try:
-            return {x["id"]: x["name"] for x in u.rpc(method, {})}
+            return u.rpc(method, {}) or []
         except Exception as e:
             print(f"[untis] {method} nicht erlaubt/fehlgeschlagen: {e}", flush=True)
-            return {}
+            return []
+
+    @classmethod
+    def _names(cls, u, method):
+        return {x["id"]: x["name"] for x in cls._list(u, method)}
 
     def _class(self, u):
         # Klassen-IDs ändern sich jedes Schuljahr -> per Name suchen statt fest eintragen

@@ -25,6 +25,8 @@ const P = {
   rain: '<path d="M4 14.9A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.24"/><path d="M16 14v6M8 14v6M12 16v6"/>',
   snow: '<path d="M4 14.9A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.24"/><path d="M8 15h.01M8 19h.01M12 17h.01M12 21h.01M16 15h.01M16 19h.01"/>',
   storm: '<path d="M6 16.33A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 .5 8.97"/><path d="m13 12-3 5h4l-3 5"/>',
+  hw: '<path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2z"/><path d="M22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"/>',
+  note: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 8.5h8M8 12.5h5"/>',
   broom: '<path d="M21.5 2.5 12 12"/><path d="M10.6 10.6 13.4 13.4 9.2 20.5 3.5 14.8Z"/><path d="M9.3 12.1 12.1 14.9M10.2 13 5.4 16.7M11.2 14 7.3 18.6"/>',
 };
 const svg = (name) => `<svg viewBox="0 0 24 24">${P[name]}</svg>`;
@@ -50,6 +52,14 @@ function tickClock() {
 // ───── Rendering ─────
 function people(list) {
   return (list || []).map((p) => `<span class="${p.k}">${esc(p.t)}</span>`).join(" ");
+}
+
+// Untis-Markierungen einer Stunde: Hausaufgabe fällig / Notiz (Arbeitsauftrag)
+const MARK_TITLES = { hw: "Hausaufgabe fällig", notes: "Notiz" };
+function marks(list) {
+  if (!list || !list.length) return "";
+  return `<span class="marks">${list.map((m) =>
+    `<span class="mark ${m}" title="${MARK_TITLES[m]}">${svg(m === "hw" ? "hw" : "note")}</span>`).join("")}</span>`;
 }
 
 function renderLessons() {
@@ -86,7 +96,7 @@ function renderLessons() {
         ? `<span class="old">${esc(c.subject_old)}</span> <span class="new">${esc(c.subject)}</span>`
         : esc(c.subject);
       return `<div class="course ${c.status}">
-          <div class="subj">${subj}</div>
+          <div class="subj"><span class="sn">${subj}</span>${marks(c.marks)}</div>
           <div class="who">${people(c.teachers)}</div>
           <div class="where">${people(c.rooms)}</div>
         </div>`;

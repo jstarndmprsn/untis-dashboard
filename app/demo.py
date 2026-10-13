@@ -11,6 +11,9 @@ TEACHERS = {1: "Mül", 2: "Sch", 3: "Wag", 4: "Bec", 5: "Hof", 6: "Kle", 7: "Wol
 ROOMS = {1: "R204", 2: "Phy1", 3: "Bio1", 4: "Sp1", 5: "Inf1", 6: "Ku1", 7: "Mu1", 8: "Ch1", 9: "R112", 10: "Aula"}
 SUBJECTS = {1: "Mat", 2: "Deu", 3: "Eng", 4: "Bio", 5: "Phy", 6: "Ges", 7: "Spo", 8: "Inf",
             9: "BKu", 10: "Mus", 11: "Che", 12: "Geo", 13: "Lat"}
+# Farben, wie sie eine Schule in Untis einträgt (nicht jedes Fach hat eine -> Ersatzfarbe)
+COLORS = {1: "c00000", 2: "ffff00", 3: "ff8000", 4: "008027", 5: "ffc0a0", 6: "ffffff", 7: "57c0ff",
+          8: "a0a0ff", 9: "c000c0", 12: "803b00", 13: "0024c0"}
 CLASSES = [{"id": 42, "name": "9a", "longName": "Klasse 9a"}, {"id": 43, "name": "9b", "longName": "Klasse 9b"}]
 PERIODS = [(800, 845), (850, 935), (955, 1040), (1045, 1130), (1150, 1235), (1240, 1325), (1330, 1415), (1420, 1505)]
 
@@ -87,7 +90,8 @@ class FakeUntisClient:
         if method == "getRooms":
             return [{"id": k, "name": v} for k, v in ROOMS.items()]
         if method == "getSubjects":
-            return [{"id": k, "name": v} for k, v in SUBJECTS.items()]
+            return [{"id": k, "name": v, **({"backColor": COLORS[k]} if k in COLORS else {})}
+                    for k, v in SUBJECTS.items()]
         if method == "getKlassen":
             return CLASSES
         if method == "getTimegridUnits":
@@ -101,6 +105,23 @@ class FakeUntisClient:
 
     def rest(self, path, **params):
         today = date.today()
+        if path == "/api/rest/view/v1/timetable/entries":
+            # Markierungen: Hausaufgabe fällig in der ersten Stunde Mathe/Englisch/Bio jeder Woche,
+            # Notiz bei allen Stunden mit Lehrer-Infotext
+            s, e = (date.fromisoformat(params[k]) for k in ("start", "end"))
+            entries, seen = [], set()
+            for r in timetable(s, e):
+                icons, texts = [], []
+                first = (r["date"], tuple(x["id"] for x in r["su"])) not in seen
+                seen.add((r["date"], tuple(x["id"] for x in r["su"])))
+                if first and r["su"] and r["su"][0]["id"] in (1, 3, 4) and datetime.strptime(
+                        str(r["date"]), "%Y%m%d").weekday() in (0, 4):
+                    icons.append("HOMEWORK")
+                if r.get("info"):
+                    icons.append("NOTES")
+                    texts.append({"type": "NOTES_FOR_ALL", "text": r["info"]})
+                entries.append({"ids": [r["id"]], "icons": icons, "texts": texts})
+            return {"days": [{"gridEntries": entries}]}
         if path == "/api/homeworks/lessons":
             due = lambda n: _int(today + timedelta(days=n))
             return {

@@ -42,6 +42,10 @@ _STARTED = time.time()
 # Anzeige-Kürzel (Grundfach aus Untis-Namen wie "Mat (8-10)", "Bio B1", "BKu2")
 SUBJECT_ALIASES = {"BKu": "Kun"}
 
+# Fachfarben: in erster Linie die offiziellen aus Untis (Stammdaten, getSubjects -> backColor);
+# diese Tabelle nur als Ersatz für Fächer ohne eingetragene Farbe
+UNTIS_COLORS = {}
+
 SUBJECT_COLORS = {
     "Mat": "#ff3b30", "Deu": "#f0e000", "Eng": "#dfa916", "Fra": "#ff9f0a", "Spa": "#ff6482",
     "Lat": "#3a2cff", "Bio": "#34c759", "Che": "#2e9e16", "Phy": "#c4bf7c", "Inf": "#a259ff",
@@ -72,6 +76,9 @@ def base_subject(name):
 
 
 def subject_color(name):
+    """Offizielle Untis-Farbe (exakter Name wie "Mat (8-10)"), sonst Ersatztabelle."""
+    if name in UNTIS_COLORS:
+        return UNTIS_COLORS[name]
     base = base_subject(name)
     if base in SUBJECT_COLORS:
         return SUBJECT_COLORS[base]
@@ -155,11 +162,34 @@ class Source:
 
 
 # ------------------ UNTIS ------------------
+def fetch_marks(u, class_id, start, end):
+    """Untis-Markierungen je Stunde: {Perioden-ID: ["hw"] / ["notes"] / beides}.
+    hw    = an dieser Stunde ist eine Hausaufgabe fällig (Untis-Symbol HOMEWORK)
+    notes = Lehrer-Notiz für alle, z. B. Arbeitsauftrag (Text NOTES_FOR_ALL). Reine
+            Kurs-Infos wie "offen", für die Untis auch ein Notiz-Symbol zeigt, zählen nicht."""
+    data = u.rest("/api/rest/view/v1/timetable/entries", start=start.isoformat(), end=end.isoformat(),
+                  format=2, resourceType="CLASS", resources=class_id, timetableType="STANDARD")
+    marks = {}
+    for day in data.get("days", []):
+        for g in day.get("gridEntries", []):
+            m = []
+            if "HOMEWORK" in (g.get("icons") or []):
+                m.append("hw")
+            if any(t.get("type") == "NOTES_FOR_ALL" and (t.get("text") or "").strip()
+                   for t in g.get("texts") or []):
+                m.append("notes")
+            if m:
+                for pid in g.get("ids") or []:
+                    marks[pid] = m
+    return marks
+
+
 class UntisFetcher:
     def __init__(self, cfg, master):
         self.cfg, self.master = cfg, master
         self.duty_label = (cfg.get("DUTY_LABEL") or "").strip().lower()
         self.warned = set()
+        self.marks = {}
 
     def _optional(self, name, fn):
         """Hausaufgaben/Ordnungsdienst sind nicht an jeder Schule für Schüler freigegeben –
@@ -174,13 +204,17 @@ class UntisFetcher:
 
     def __call__(self):
         today = date.today()
+        # ab Montag dieser Woche: die Wochenansicht (server.py) nutzt dieselben Stunden
+        start = today - timedelta(days=today.weekday())
+        end = today + timedelta(days=10)
         with untis.connect(self.cfg) as u:
             m = self.master.ensure(u)
+            UNTIS_COLORS.update(m.colors)
             try:
                 rows = u.rpc("getTimetable", {"options": {
                     "element": {"id": m.class_id, "type": 1},
-                    "startDate": today.strftime("%Y%m%d"),
-                    "endDate": (today + timedelta(days=10)).strftime("%Y%m%d"),
+                    "startDate": start.strftime("%Y%m%d"),
+                    "endDate": end.strftime("%Y%m%d"),
                     "showInfo": True, "showSubstText": True, "showLsText": True, "showStudentgroup": True,
                 }})
             except Exception:
@@ -195,10 +229,17 @@ class UntisFetcher:
                 startDate=(today - timedelta(days=7)).strftime("%Y%m%d"),
                 endDate=(today + timedelta(days=14)).strftime("%Y%m%d"),
                 classId=m.class_id)) if self.duty_label else {}
+            # Symbole "Hausaufgabe fällig"/"Notiz" – nicht überall freigegeben; bei Fehler alter Stand
+            try:
+                self.marks = fetch_marks(u, m.class_id, start, end)
+            except Exception as e:
+                if "Untis-Markierungen" not in self.warned:
+                    print(f"[heute] Untis-Markierungen nicht verfügbar ({e})", flush=True)
+                    self.warned.add("Untis-Markierungen")
 
         return {
             "lessons": [self._lesson(l) for l in rows],
-            "homework": self._homework(hw, today),
+            "homework": self._homework(hw, today, rows),
             "duties": self._duties(services),
         }
 
@@ -229,7 +270,9 @@ class UntisFetcher:
 
         if code == "cancelled" or teacher_removed:
             status = "cancelled"
-        elif not te_list and not l.get("su"):
+        elif not l.get("su"):
+            # ohne Fach = Veranstaltung (Ausflug, Kinobesuch …) – auch wenn eine Lehrkraft
+            # eingetragen ist (Untis markiert sie dann als "irregular")
             status = "event"
         elif any(x["k"] for x in su + te + ro) or code == "irregular":
             status = "changed"
@@ -242,17 +285,25 @@ class UntisFetcher:
         return {
             "date": l["date"], "start": l["startTime"], "end": l["endTime"],
             "subject": base_subject(subject_raw) if status != "event" else subject_raw,
+            "subject_full": subject_raw,      # z. B. "BKu2" – unterscheidet parallele Kurse
             "subject_old": next((base_subject(x["t"]) for x in su if x["k"] == "old"), None),
             "color": subject_color(subject_raw),
             "teachers": te, "rooms": ro, "status": status,
             "group": l.get("sg") or subject_raw,
             "note": clean_text(l.get("substText")),
             "info": clean_text(l.get("info")),
+            "marks": self.marks.get(l.get("id"), []),
         }
 
     # -- Hausaufgaben --
-    def _homework(self, hw, today):
+    def _homework(self, hw, today, rows):
         subj = {l["id"]: l["subject"] for l in hw.get("lessons", [])}
+        # Beginn der ersten Stunde des Fachs am Abgabetag -> Sortierung innerhalb eines Tages
+        first_start = {}
+        for r in rows:
+            for s in r.get("su") or []:
+                k = (r["date"], self.master.subjects.get(s.get("id")))
+                first_start[k] = min(first_start.get(k, 9999), r["startTime"])
         out = []
         for h in hw.get("homeworks", []):
             due = int_date(h["dueDate"])
@@ -264,8 +315,11 @@ class UntisFetcher:
                 text = f"{text}\n{remark}" if text else remark
             name = subj.get(h.get("lessonId"), "?")
             out.append({"subject": base_subject(name), "color": subject_color(name),
-                        "due": h["dueDate"], "text": text})
-        out.sort(key=lambda x: x["due"])
+                        "due": h["dueDate"], "text": text,
+                        "_key": (h["dueDate"], first_start.get((h["dueDate"], name), 9999), name, h.get("id", 0))})
+        # Untis liefert die Reihenfolge nicht stabil -> nach Abgabetag, dann nach der
+        # Schulstunde, in der sie fällig ist (unbekannt = ans Tagesende), dann fest nach Fach/ID
+        out.sort(key=lambda x: x.pop("_key"))
         return out
 
     # -- Klassenordner --
@@ -358,6 +412,17 @@ def fetch_weather(lat, lon):
 
 
 # ------------------ AUFBEREITUNG FÜR DIE SEITE ------------------
+def hide_covered_by_events(lessons):
+    """Stunden, die wegen einer Veranstaltung ausfallen (gleicher Tag, Zeit überschneidet sich),
+    weglassen – die Veranstaltung ersetzt sie (Untis führt beide)."""
+    events = [l for l in lessons if l["status"] == "event"]
+    if not events:
+        return lessons
+    return [l for l in lessons if not (
+        l["status"] == "cancelled" and any(
+            e["date"] == l["date"] and e["start"] < l["end"] and e["end"] > l["start"] for e in events))]
+
+
 def build_day(lessons, now):
     """Wählt den anzuzeigenden Tag (heute bis Schulschluss, danach nächster Schultag)
     und fasst Doppelstunden + parallele Kurse zusammen."""
@@ -367,6 +432,7 @@ def build_day(lessons, now):
     for l in lessons:
         by_day.setdefault(int_date(l["date"]), []).append(l)
 
+    by_day = {d: hide_covered_by_events(ls) for d, ls in by_day.items()}
     target = None
     for d in sorted(by_day):
         if d < today:
@@ -389,6 +455,7 @@ def build_day(lessons, now):
             prev["end"] = max(prev["end"], l["end"])
             if l["info"] and l["info"] not in prev["info"]:
                 prev["info"] = (prev["info"] + "\n" + l["info"]).strip()
+            prev["marks"] = [m for m in ("hw", "notes") if m in prev["marks"] or m in l["marks"]]
             continue
         merged.append(dict(l))
 
@@ -402,7 +469,7 @@ def build_day(lessons, now):
         out.append({
             "start": hhmm(start), "end": hhmm(max(c["end"] for c in courses)),
             "start_min": minutes(start), "end_min": minutes(max(c["end"] for c in courses)),
-            "courses": [{k: c[k] for k in ("subject", "subject_old", "color", "teachers", "rooms", "status")}
+            "courses": [{k: c[k] for k in ("subject", "subject_old", "color", "teachers", "rooms", "status", "marks")}
                         for c in courses],
         })
 
@@ -503,6 +570,15 @@ def init(app, cfg, master):
             "features": {"calendar": "calendar" in _sources, "weather": "weather" in _sources},
             "status": {k: source_status(v) for k, v in _sources.items()},
         })
+
+
+def untis_snapshot():
+    """(Daten, Fehler, Zeitpunkt) der Untis-Quelle – für die Wochenansicht (server.py)."""
+    return _sources["untis"].snapshot()
+
+
+def untis_status():
+    return source_status(_sources["untis"])
 
 
 def start():

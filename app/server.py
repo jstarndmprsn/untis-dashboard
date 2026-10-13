@@ -9,10 +9,9 @@ Einstellungen: config.env im Projektordner (anlegen mit `python3 app/configure.p
 Ausprobieren ohne Untis-Konto:  python3 app/server.py --demo   [--no-calendar]
 """
 import argparse
-import threading
 import time
 from flask import Flask
-from datetime import date, timedelta, datetime
+from datetime import date, timedelta
 from html import escape
 
 import config
@@ -49,30 +48,36 @@ dashboard.init(app, CFG, MASTER)
 # Thermal-Dashboard /thermal (beide Tasten 2 s halten)
 thermal.init(app)
 
-# Wie oft Untis abgefragt wird (Sekunden). Die Seite selbst wird aus dem Cache ausgeliefert.
-FETCH_INTERVAL = 90
-
 # Nach dem Booten ist das Netz oft noch nicht da -> so lange "wird geladen" statt Fehler zeigen
 STARTUP_GRACE = 180
-_STARTED = time.time()
 
 DAYS = ["Mo", "Di", "Mi", "Do", "Fr"]
 
-# Fachfarben wie in der Tagesansicht
-subject_color = dashboard.subject_color
+# Reihenfolge mehrerer Kurse in einer Zelle: Änderungen zuerst (bekommen mehr Platz)
+STATUS_ORDER = {"cancelled": 0, "changed": 1, "event": 2, "normal": 3}
+
+MARK_ICONS = {
+    # Hausaufgabe fällig (Buch) / Notiz bzw. Arbeitsauftrag (Sprechblase), wie auf /heute
+    "hw": ("Hausaufgabe fällig", '<path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2z"/>'
+                                 '<path d="M22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"/>'),
+    "notes": ("Notiz", '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'
+                       '<path d="M8 8.5h8M8 12.5h5"/>'),
+}
 
 
 def hhmm(v):
     return f"{v // 100:02d}:{v % 100:02d}"
 
 
-def build_periods(master_periods, timetable):
-    """Zeilen der Tabelle = Stunden aus dem Untis-Zeitraster. Ohne Zeitraster
-    (nicht freigegeben) werden sie aus den Anfangs-/Endzeiten der Woche abgeleitet."""
+def build_periods(master_periods, lessons):
+    """Zeilen der Tabelle = Stunden aus dem Untis-Zeitraster, aber nur die, in denen diese
+    Woche etwas stattfindet (viele Raster reichen von der Frühstunde bis abends). Ohne
+    Zeitraster (nicht freigegeben) werden sie aus den Anfangs-/Endzeiten abgeleitet."""
     if master_periods:
-        periods = master_periods
+        periods = [p for p in master_periods
+                   if any(l["start"] < p["end"] and l["end"] > p["start"] for l in lessons)]
     else:
-        times = sorted({(l["startTime"], l["endTime"]) for l in timetable if l.get("startTime")})
+        times = sorted({(l["start"], l["end"]) for l in lessons})
         periods = [{"name": str(i + 1), "start": s, "end": e} for i, (s, e) in enumerate(times)]
     out = []
     for p in periods:
@@ -101,6 +106,7 @@ td { font-size: 1.1em; padding: 10px 10px 10px 18px; border-radius: 15px; backgr
 td::before { content: ''; position: absolute; left: 0; top: 0; width: 8px; height: 100%; border-radius: 15px 0 0 15px; background: transparent; }
 td .subject { font-weight: bold; display: block; }
 td .info { font-size: 0.95em; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+td .note { color: #bbb; }
 .empty { background: #111; border: none; }
 .error { display: flex; align-items: center; justify-content: center; height: 100vh; font-size: 2.5em; font-weight: bold; color: #ff3333; }
 
@@ -110,6 +116,13 @@ td.cancelled { border-color: #ff3333 !important; }
 td.event { border-color: #00bcd4 !important; }
 .old-teacher { text-decoration: line-through; color: #888; }
 .new-teacher, .new-room, .new-subject { color: #4caf50; border-bottom: 2px solid #4caf50; padding-bottom: 1px; }
+
+/* Untis-Markierungen: Hausaufgabe fällig / Notiz */
+.marks { white-space: nowrap; margin-left: 0.3em; }
+.mark { width: 0.9em; height: 0.9em; vertical-align: -0.1em; margin-left: 0.2em; fill: none; stroke-width: 2;
+        stroke-linecap: round; stroke-linejoin: round; }
+.mark.hw { stroke: #ffcc4d; }
+.mark.notes { stroke: #bbb; }
 
 /* Multi-Course Styles */
 .multi-course { display: flex; gap: 3px; height: 100%; }
@@ -121,479 +134,128 @@ td.multi::before { background: var(--stripe-gradient, var(--stripe-color)) !impo
 #version-screen { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #111; color: #fff; align-items: center; justify-content: center; font-size: 5em; font-weight: bold; z-index: 9999; }
 """
 
-def _find_texts_in_data(d):
-    texts = []
-    if isinstance(d, dict):
-        for k, v in d.items():
-            lk = str(k).lower()
-            if isinstance(v, str):
-                if any(sub in lk for sub in ("text", "subst", "info", "note", "lstext")) and v.strip():
-                    texts.append(v.strip())
-            else:
-                texts.extend(_find_texts_in_data(v))
-    elif isinstance(d, list):
-        for it in d:
-            texts.extend(_find_texts_in_data(it))
-    return texts
+
+# ------------------ WOCHENTABELLE ------------------
+# Die Stunden kommen aufbereitet aus dashboard.py – dieselbe Erkennung von Ausfall,
+# Vertretung, Raumänderung und Veranstaltung wie in der Tagesansicht /heute, dieselben
+# (offiziellen Untis-)Fachfarben und Markierungen. Hier wird nur die Tabelle gezeichnet.
+
+def marks_html(marks):
+    """Kleine Symbole hinter dem Fach für Untis-Markierungen der Stunde."""
+    icons = "".join(f'<svg class="mark {m}" viewBox="0 0 24 24"><title>{MARK_ICONS[m][0]}</title>{MARK_ICONS[m][1]}</svg>'
+                    for m in marks or [] if m in MARK_ICONS)
+    return f'<span class="marks">{icons}</span>' if icons else ""
 
 
-class _Lesson:
-    """Rohdaten einer Untis-Stunde (getTimetable) – `_data` wie bei python-webuntis."""
-
-    def __init__(self, data):
-        self._data = data
-        d = str(data.get("date", ""))
-        self.day = date(int(d[:4]), int(d[4:6]), int(d[6:])).weekday() if len(d) == 8 else None
-        self.start, self.end = data.get("startTime"), data.get("endTime")
-
-
-def get_timetable():
-    try:
-        today = date.today()
-        start_of_week = today - timedelta(days=today.weekday())
-
-        with untis.connect(CFG) as u:
-            m = MASTER.ensure(u)
-            try:
-                rows = u.rpc("getTimetable", {
-                    "id": m.class_id, "type": 1,
-                    "startDate": start_of_week.strftime("%Y%m%d"),
-                    "endDate": (start_of_week + timedelta(days=4)).strftime("%Y%m%d"),
-                })
-            except Exception:
-                MASTER.invalidate()   # z. B. neues Schuljahr -> Klassen-ID neu suchen
-                raise
-
-        timetable = [_Lesson(r) for r in rows]
-        periods = build_periods(m.periods, rows)
-        HOURS = list(range(len(periods)))
-
-        grid = {(d, h): {"lessons": [], "class": "empty", "style": ""} for d in range(5) for h in HOURS}
-
-        # Namen aus Untis HTML-sicher machen (werden direkt ins HTML geschrieben)
-        all_teachers = {k: escape(v) for k, v in m.teachers.items()}
-        all_rooms = {k: escape(v) for k, v in m.rooms.items()}
-        all_subjects = {k: escape(v) for k, v in m.subjects.items()}
-
-        for lesson in timetable:
-            if lesson.start is None or lesson.day is None:
-                continue
-            day = lesson.day
-            if day > 4:
-                continue
-
-            # Zugriff auf RAW-Daten statt Properties
-            subject = "?"
-            teacher = ""
-            room = ""
-            event_text = None
-            is_event = False
-            additional_info = ""
-            
-            # Original-Werte für Vergleich
-            original_subject = None
-            original_teacher = None
-            original_room = None
-            
-            # Status-Code prüfen
-            status_code = None
-            try:
-                if 'code' in lesson._data:
-                    status_code = lesson._data['code']
-            except:
-                pass
-            
-            # Fach aus Raw-Data
-            try:
-                if 'su' in lesson._data and lesson._data['su']:
-                    subject = escape(lesson._data['su'][0].get('name', "?"))
-                    subject_id = lesson._data['su'][0].get('id')
-                    if subject_id and subject_id in all_subjects:
-                        subject = all_subjects[subject_id]
-                    # Original-Fach (falls vorhanden)
-                    if 'substText' in lesson._data['su'][0]:
-                        original_subject = lesson._data['su'][0]['substText']
-            except:
-                pass
-            
-            # Lehrer aus Raw-Data
-            try:
-                if 'te' in lesson._data and lesson._data['te']:
-                    teacher_ids = [t['id'] for t in lesson._data['te']]
-                    teachers = [all_teachers.get(tid, "") for tid in teacher_ids]
-                    teacher = ", ".join([t for t in teachers if t])  # Alle Lehrer mit Komma getrennt
-                    # Original-Lehrer prüfen
-                    if lesson._data['te'][0] and 'orgid' in lesson._data['te'][0]:
-                        orig_teacher_id = lesson._data['te'][0]['orgid']
-                        original_teacher = all_teachers.get(orig_teacher_id, "")
-            except:
-                pass
-            
-            # Raum aus Raw-Data
-            try:
-                if 'ro' in lesson._data and lesson._data['ro']:
-                    room_id = lesson._data['ro'][0]['id']
-                    room = all_rooms.get(room_id, "")
-                    # Original-Raum prüfen
-                    if 'orgid' in lesson._data['ro'][0]:
-                        orig_room_id = lesson._data['ro'][0]['orgid']
-                        original_room = all_rooms.get(orig_room_id, "")
-            except:
-                pass
-
-            # Zusätzliche Informationen
-            try:
-                additional_info = (lesson._data.get('info', '') or
-                                   lesson._data.get('lstext', '') or
-                                   lesson._data.get('topic', '') or
-                                   lesson._data.get('text', '') or
-                                   lesson._data.get('subjectText', '') or
-                                   lesson._data.get('teacherText', '') or
-                                   lesson._data.get('roomText', '')).strip()
-                additional_info = escape(additional_info)
-            except:
-                pass
-
-            # Falls nichts gefunden wurde, rekursiv nach möglichen Text-/Subst-Feldern im Raw-Dict suchen
-            try:
-                if not additional_info:
-                    found = _find_texts_in_data(lesson._data)
-                    # Filtere kurze/falsche Treffer
-                    found = [f for f in found if len(f) > 1 and f != "?"]
-                    if found:
-                        # Priorisiere längere/nützlichere Texte
-                        additional_info = escape(" | ".join(dict.fromkeys(found)))
-            except:
-                pass
-
-            # Event/Veranstaltung prüfen: robuster erkennen
-            try:
-                # Standardfall: expliziter 'irregular' Status ohne Original-Lehrer
-                if status_code == 'irregular' and (not original_teacher or original_teacher == teacher):
-                    is_event = True
-                # Manche APIs setzen Flags/Keys für Events
-                elif lesson._data.get('isEvent') or lesson._data.get('event') or lesson._data.get('type') == 'event':
-                    is_event = True
-                # Wenn kein Lehrer vorhanden, aber ein Fach gesetzt ist und es kein explicit 'cancelled' ist,
-                # ist es wahrscheinlich eine Veranstaltung und kein Ausfall.
-                # Ausnahme: Untis liefert te=[{'id': 0, 'orgid': X}] -> Lehrer X entfällt ohne Vertretung = Ausfall.
-                elif not teacher and not original_teacher and subject != "?" and status_code != 'cancelled':
-                    is_event = True
-
-                if is_event:
-                    lstext = escape((lesson._data.get('lstext') or '').strip())
-                    event_text = subject if subject != "?" else (lstext or "Veranstaltung")
-            except:
-                pass
-
-            # Prüfe ob Vertretung oder Ausfall. Wichtig: Events ohne Lehrer gelten nicht als Ausfall.
-            is_cancelled = (status_code == 'cancelled') or (not teacher and not is_event)
-            is_substitution = False
-
-            # HTML für Lehrer und Raum
-            teacher_html = ""
-            room_html = ""
-            subject_html = subject
-
-            # Lehrer-Anzeige
-            if is_cancelled:
-                # Echter Ausfall - Lehrer durchstreichen
-                if teacher:
-                    # Lehrer ist bekannt, aber Stunde fällt aus
-                    teacher_html = f'<span class="old-teacher">{teacher}</span>'
-                elif original_teacher:
-                    # Lehrer wurde ausgetragen (te id 0 + orgid)
-                    teacher_html = f'<span class="old-teacher">{original_teacher}</span>'
-                else:
-                    teacher_html = '<span class="old-teacher">---</span>'
-                # WICHTIG: Bei Ausfall keinen neuen Lehrer
-                teacher = ""
-            elif original_teacher and original_teacher != teacher:
-                # Vertretungslehrer
-                is_substitution = True
-                teacher_html = f'<span class="old-teacher">{original_teacher}</span> <span class="new-teacher">{teacher}</span>'
-            else:
-                teacher_html = teacher
-
-            # Raum-Anzeige
-            if original_room and original_room != room:
-                # Raumänderung mit Original
-                is_substitution = True
-                room_html = f'<span class="new-room">{room}</span>'
-            else:
-                room_html = room
-            
-            # Fach-Anzeige (falls geändert oder ausgefallen)
-            # WICHTIG: Prüfung NACH der Lehrer-Verarbeitung, da dort teacher="" gesetzt wird
-            if not teacher:
-                # Wenn es ein Event ist, zeige das Event-Label statt Ausfall-Markierung
-                if is_event:
-                    subject_html = event_text if event_text else ("Veranstaltung" if subject == "?" else subject)
-                else:
-                    # Kein Lehrer = Ausfall -> Fach durchstreichen
-                    subject_html = f'<span class="old-teacher">{subject}</span>'
-            elif original_subject and original_subject != subject:
-                # Fach wurde geändert
-                is_substitution = True
-                subject_html = f'<span class="old-teacher">{original_subject}</span> <span class="new-subject">{subject}</span>'
-            else:
-                subject_html = "Veranstaltung" if subject == "?" else subject
-            # Wenn es einen speziellen Vertretungstext gibt und die Original-Lehrkraft weiterhin eingetragen ist,
-            # dann als Vertretung markieren und den Text anzeigen.
-            note_html = ""
-            try:
-                show_note = False
-                if additional_info and original_teacher and original_teacher == teacher:
-                    show_note = True
-                if show_note:
-                    is_substitution = True
-                    note_html = f' <span class="info">{additional_info}</span>'
-            except:
-                note_html = ""
-
-            # Lektion-Objekt erstellen
-            lesson_data = {
-                "subject": subject,
-                "subject_html": subject_html,
-                "teacher": teacher,  # Roher Lehrername
-                "teacher_html": teacher_html,
-                "room": room,  # Roher Raumname
-                "room_html": room_html,
-                "note_html": note_html,
-                "note": additional_info,
-                "color": subject_color(subject),
-                "is_cancelled": is_cancelled,
-                "is_substitution": is_substitution,
-                "is_event": is_event,
-                "event_text": event_text
-            }
-            
-            # In alle Stunden des Zeitrasters eintragen, die diese Einheit belegt
-            # (Veranstaltungen über mehrere Stunden, Blockstunden)
-            for h_val in covered_periods(periods, lesson.start, lesson.end or lesson.start + 1):
-                grid[(day, h_val)]["lessons"].append(lesson_data)
-
-        # Grid in HTML-Format konvertieren
-        final_grid = {}
-        for (day, hour), cell in grid.items():
-            lessons = cell["lessons"]
-            
-            if not lessons:
-                # Leere Zelle
-                final_grid[(day, hour)] = {"text": "", "class": "empty", "style": "", "is_event": False, "rowspan": 1}
-                continue
-            
-            # Duplikate entfernen basierend auf Fach + Lehrer + Raum
-            unique_lessons = []
-            seen = set()
-            for lesson in lessons:
-                key = (lesson["subject"], lesson["teacher_html"], lesson["room_html"])
-                if key not in seen:
-                    seen.add(key)
-                    unique_lessons.append(lesson)
-            
-            lessons = unique_lessons
-            
-            # Wenn nur ein Kurs übrig ist
-            if len(lessons) == 1:
-                lesson = lessons[0]
-                
-                # Event speziell darstellen
-                if lesson.get("is_event"):
-                    text = f'<span class="subject">{lesson["subject_html"]}</span><br><span class="info">{lesson["teacher_html"]} {lesson["room_html"]}{lesson.get("note_html", "")}</span>'
-                    cls = "event"
-                    if lesson["is_cancelled"]:
-                        cls += " cancelled"
-                    final_grid[(day, hour)] = {
-                        "text": text,
-                        "class": cls,
-                        "style": f"--stripe-color:{lesson['color']};",
-                        "is_event": True,
-                        "rowspan": 1
-                    }
-                    continue
-                
-                text = f'<span class="subject">{lesson["subject_html"]}</span><br><span class="info">{lesson["teacher_html"]} {lesson["room_html"]}{lesson.get("note_html", "")}</span>'
-                cls = "normal"
-                
-                # WICHTIG: Entscheidend ist ob ein Lehrer DA ist, nicht der Status!
-                # ROT = Kein Lehrer (egal ob cancelled oder substitution)
-                # GRÜN = Lehrer vorhanden UND (cancelled ODER substitution)
-                if not lesson["teacher"]:
-                    # Kein Lehrer = Ausfall = ROT
-                    cls += " cancelled"
-                elif lesson["is_cancelled"] or lesson["is_substitution"]:
-                    # Lehrer vorhanden + Änderung = Vertretung/Verlegung = GRÜN
-                    cls += " substitution"
-                    
-                final_grid[(day, hour)] = {
-                    "text": text,
-                    "class": cls,
-                    "style": f"--stripe-color:{lesson['color']};",
-                    "is_event": False,
-                    "rowspan": 1
-                }
-            else:
-                # Prüfe zuerst ob ein Event dabei ist
-                event_lesson = None
-                other_lessons = []
-                for l in lessons:
-                    if l.get("is_event"):
-                        event_lesson = l
-                    else:
-                        other_lessons.append(l)
-                
-                # Wenn Event dabei ist, zeige nur das Event
-                if event_lesson:
-                    text = f'<span class="subject">{event_lesson["subject_html"]}</span><br><span class="info">{event_lesson["teacher_html"]} {event_lesson["room_html"]}{event_lesson.get("note_html", "")}</span>'
-                    cls = "event"
-                    if event_lesson["is_cancelled"]:
-                        cls += " cancelled"
-                    final_grid[(day, hour)] = {
-                        "text": text,
-                        "class": cls,
-                        "style": f"--stripe-color:{event_lesson['color']};",
-                        "is_event": True,
-                        "rowspan": 1
-                    }
-                    continue
-                
-                # Mehrere verschiedene Kurse - aber nur anzeigen wenn WIRKLICH unterschiedliche Fächer
-                # Filter: Nur zählen wenn verschiedene Fächer
-                subjects_set = set(l["subject"] for l in lessons)
-                
-                if len(subjects_set) == 1:
-                    # Alle gleichen Fächer -> wahrscheinlich Duplikat/Verlegung, zeige nur ersten
-                    lesson = lessons[0]
-                    text = f'<span class="subject">{lesson["subject_html"]}</span><br><span class="info">{lesson["teacher_html"]} {lesson["room_html"]}{lesson.get("note_html", "")}</span>'
-                    cls = "normal"
-                    
-                    # Gleiche Logik: Kein Lehrer = ROT, sonst GRÜN bei Änderungen
-                    if not lesson["teacher"]:
-                        cls += " cancelled"
-                    elif lesson["is_cancelled"] or lesson["is_substitution"]:
-                        cls += " substitution"
-                        
-                    final_grid[(day, hour)] = {
-                        "text": text,
-                        "class": cls,
-                        "style": f"--stripe-color:{lesson['color']};",
-                        "is_event": False,
-                        "rowspan": 1
-                    }
-                else:
-                    # Wirklich mehrere verschiedene Fächer
-                    # Priorisierung: Ausfälle zuerst, dann Vertretungen
-                    lessons_sorted = sorted(lessons, key=lambda x: (not x["is_cancelled"], not x["is_substitution"]))
-                    
-                    # Prüfe: Gibt es einen echten Ausfall (ohne Lehrer)?
-                    # Ausfall = is_cancelled UND kein aktiver Lehrer
-                    has_real_cancellation = any(l["is_cancelled"] and not l["teacher"] for l in lessons)
-                    all_cancelled = all(l["is_cancelled"] and not l["teacher"] for l in lessons)
-                    
-                    # Kurse nebeneinander anzeigen mit flex-Gewichtung
-                    parts = []
-                    colors = []
-                    
-                    for i, lesson in enumerate(lessons_sorted):
-                        # Erste Lektion (mit Problem) bekommt mehr Platz
-                        flex = "2" if i == 0 and (lesson["is_cancelled"] or lesson["is_substitution"]) else "1"
-                        part = f'<div class="course" style="flex:{flex}"><span class="subject">{lesson["subject_html"]}</span><br><span class="info">{lesson["teacher_html"]} {lesson["room_html"]}{lesson.get("note_html", "")}</span></div>'
-                        parts.append(part)
-                        colors.append(lesson["color"])
-                    
-                    text = '<div class="multi-course">' + ''.join(parts) + '</div>'
-                    cls = "normal multi"
-                    
-                    # WICHTIG: 
-                    # ROT = ALLE Kurse fallen aus
-                    # GRÜN = Mindestens ein Kurs findet statt (Verlegung/Vertretung/teilweiser Ausfall)
-                    if all_cancelled:
-                        cls += " cancelled"
-                    elif has_real_cancellation or any(l["is_substitution"] for l in lessons):
-                        cls += " substitution"
-                    
-                    # Gradient für mehrere Farben
-                    if len(colors) > 1:
-                        gradient = f"linear-gradient(to right, {', '.join(colors)})"
-                        style = f"--stripe-color:{colors[0]}; --stripe-gradient:{gradient};"
-                    else:
-                        style = f"--stripe-color:{colors[0]};"
-                    
-                    final_grid[(day, hour)] = {"text": text, "class": cls, "style": style, "is_event": False, "rowspan": 1}
-        
-        # Berechne rowspan für Events
-        for d in range(5):
-            for i, h in enumerate(HOURS):
-                if final_grid[(d, h)]["rowspan"] == 0:
-                    continue
-                if final_grid[(d, h)]["is_event"]:
-                    rowspan = 1
-                    for j in range(i + 1, len(HOURS)):
-                        h_next = HOURS[j]
-                        if (final_grid[(d, h_next)]["text"] == final_grid[(d, h)]["text"] and
-                            final_grid[(d, h_next)]["is_event"]):
-                            rowspan += 1
-                            final_grid[(d, h_next)]["rowspan"] = 0
-                        else:
-                            break
-                    final_grid[(d, h)]["rowspan"] = rowspan
-        
-        return final_grid, start_of_week, periods
-
-    except Exception as e:
-        error_msg = str(e)
-        error_type = type(e).__name__
-        
-        # Spezifische Fehlermeldungen
-        if any(w in error_msg.lower() for w in ("login", "authentication", "bad credentials")):
-            return f"Login fehlgeschlagen. Bitte Benutzername und Passwort prüfen.", None
-        elif "connection" in error_msg.lower() or "network" in error_msg.lower():
-            return f"Netzwerkfehler: WebUntis-Server nicht erreichbar.", None
-        elif "timeout" in error_msg.lower():
-            return f"Zeitüberschreitung: WebUntis-Server antwortet nicht.", None
+def people_html(people, cancelled, new_cls):
+    """[{t, k}] aus dashboard -> alt durchgestrichen, neu grün; bei Ausfall alles durchgestrichen."""
+    parts = []
+    for p in people:
+        name = escape(p["t"])
+        if cancelled or p["k"] == "old":
+            parts.append(f'<span class="old-teacher">{name}</span>')
+        elif p["k"] == "new":
+            parts.append(f'<span class="{new_cls}">{name}</span>')
         else:
-            return f"Fehler beim Laden: {error_type} - {error_msg}", None
-
-# ------------------ CACHE ------------------
-# Untis wird nur alle FETCH_INTERVAL Sekunden im Hintergrund abgefragt.
-# Schlägt ein Abruf fehl, bleibt der letzte erfolgreiche Plan stehen.
-_cache = {"grid": None, "start_of_week": None, "periods": None, "fetched_at": None, "error": None}
-_cache_lock = threading.Lock()
+            parts.append(name)
+    return " ".join(parts)
 
 
-def refresh_cache():
-    result = get_timetable()
-    with _cache_lock:
-        if isinstance(result[0], str):
-            _cache["error"] = result[0]
-            print(f"Untis-Abruf fehlgeschlagen: {result[0]}", flush=True)
-        else:
-            _cache["grid"], _cache["start_of_week"], _cache["periods"] = result
-            _cache["fetched_at"] = datetime.now()
-            _cache["error"] = None
+def course_html(l, full_name=False):
+    cancelled = l["status"] == "cancelled"
+    subject = escape(l.get("subject_full") if full_name and l.get("subject_full") else l["subject"])
+    if cancelled:
+        subject = f'<span class="old-teacher">{subject}</span>'
+    elif l["subject_old"] and l["subject_old"] != l["subject"]:
+        subject = f'<span class="old-teacher">{escape(l["subject_old"])}</span> <span class="new-subject">{subject}</span>'
+    info = " ".join(x for x in (people_html(l["teachers"], cancelled, "new-teacher"),
+                                people_html(l["rooms"], False, "new-room")) if x)
+    if l["note"] and l["note"] != l["subject"]:   # Vertretungstext, z. B. "Entfall", "AA für zuhause"
+        note = escape(l["note"])
+        info += f' <span class="note">· {note}</span>' if info else f'<span class="note">{note}</span>'
+    return f'<span class="subject">{subject}{marks_html(l["marks"])}</span><br><span class="info">{info or "&nbsp;"}</span>'
 
 
-def fetch_loop():
-    failures = 0
-    while True:
-        try:
-            refresh_cache()
-        except Exception as e:
-            print(f"Fehler im Abruf-Thread: {e}", flush=True)
-        with _cache_lock:
-            failed = _cache["error"] is not None
-        # nach Fehler schnell erneut versuchen (WLAN beim Booten noch nicht da)
-        failures = failures + 1 if failed else 0
-        time.sleep(min(FETCH_INTERVAL, [3, 5, 10, 20, 40, 60][min(failures, 6) - 1]) if failed else FETCH_INTERVAL)
+def cell(lessons):
+    """Alle Kurse einer Stunde -> {text, class, style, is_event}."""
+    # Untis liefert manche Stunden mehrfach (z. B. eine pro beteiligter Klasse)
+    uniq = {}
+    for l in lessons:
+        uniq.setdefault((l["group"], l["subject"], l["status"]), l)
+    ls = sorted(uniq.values(), key=lambda l: (STATUS_ORDER.get(l["status"], 9), l["group"]))
+    status = {l["status"] for l in ls}
+
+    # gleiche Einteilung wie /heute: alle entfallen = rot, nur Veranstaltungen = blau,
+    # irgendeine Änderung = grün
+    if status == {"cancelled"}:
+        cls = "normal cancelled"
+    elif status == {"event"}:
+        cls = "event"
+    elif status != {"normal"}:
+        cls = "normal substitution"
+    else:
+        cls = "normal"
+    is_event = cls == "event"
+
+    colors = [l["color"] for l in ls]
+    if len(ls) == 1:
+        return {"text": course_html(ls[0]), "class": cls, "style": f"--stripe-color:{colors[0]};",
+                "is_event": is_event}
+    # parallele Kurse mit gleichem Kürzel (z. B. drei Kunstkurse) -> volle Kursnamen ("BKu1", "BKu2")
+    names = [l["subject"] for l in ls]
+    full = len(set(names)) < len(names)
+    parts = []
+    for i, l in enumerate(ls):
+        # erster Kurs mit Änderung bekommt mehr Platz
+        flex = "2" if i == 0 and l["status"] in ("cancelled", "changed") else "1"
+        parts.append(f'<div class="course" style="flex:{flex}">{course_html(l, full)}</div>')
+    gradient = f"linear-gradient(to right, {', '.join(colors)})"
+    return {"text": '<div class="multi-course">' + "".join(parts) + "</div>",
+            "class": cls if is_event else cls + " multi",
+            "style": f"--stripe-color:{colors[0]}; --stripe-gradient:{gradient};",
+            "is_event": is_event}
+
+
+def week_grid(lessons, periods, monday):
+    """Aufbereitete Stunden (dashboard) -> {(Tag, Stunde): Zelle} für Mo–Fr."""
+    raw = {(d, h): [] for d in range(5) for h in range(len(periods))}
+    for l in lessons:
+        d = (dashboard.int_date(l["date"]) - monday).days
+        if not 0 <= d <= 4:
+            continue
+        # in alle Stunden des Zeitrasters eintragen, die die Einheit belegt (Blockstunden, Ausflüge)
+        for h in covered_periods(periods, l["start"], l["end"] or l["start"] + 1):
+            raw[(d, h)].append(l)
+
+    grid = {}
+    for key, ls in raw.items():
+        grid[key] = ({**cell(ls), "rowspan": 1} if ls else
+                     {"text": "", "class": "empty", "style": "", "is_event": False, "rowspan": 1})
+
+    # Veranstaltungen über mehrere Stunden zu einer hohen Zelle zusammenfassen
+    for d in range(5):
+        for h in range(len(periods)):
+            c = grid[(d, h)]
+            if c["rowspan"] == 0 or not c["is_event"]:
+                continue
+            for h2 in range(h + 1, len(periods)):
+                n = grid[(d, h2)]
+                if n["is_event"] and n["text"] == c["text"]:
+                    c["rowspan"] += 1
+                    n["rowspan"] = 0
+                else:
+                    break
+    return grid
 
 
 # ==================== VERSION STRING - HIER ÄNDERN ====================
-VERSION = "V.1.3"
+VERSION = "V.1.4"
 # ======================================================================
 
 PAGE_CSS = CSS + """
 td.normal::before { background: var(--stripe-color); }
+table.compact td { padding-top: 4px; padding-bottom: 4px; }
+table.compact td br { display: none; }
 .no-school { background: #222; color: #666; font-size: 1.5em; text-align: center; padding: 50px; border-radius: 15px; }
 .stale { position: fixed; bottom: 6px; right: 12px; background: #5a1a1a; color: #ffb3b3; padding: 4px 10px; border-radius: 6px; font-size: 0.9em; z-index: 100; }
 """
@@ -602,74 +264,62 @@ td.normal::before { background: var(--stripe-color); }
 def render_content():
     """Nur der wechselnde Teil der Seite (Tabelle bzw. Fehlermeldung).
     Enthält bewusst keine Uhrzeit -> ändert sich nur, wenn sich Daten ändern."""
-    with _cache_lock:
-        grid = _cache["grid"]
-        start_of_week = _cache["start_of_week"]
-        periods = _cache["periods"]
-        fetched_at = _cache["fetched_at"]
-        cache_error = _cache["error"]
+    data, error, fetched_at = dashboard.untis_snapshot()
 
     # Noch nie erfolgreich geladen -> Lade- bzw. Fehleranzeige
-    if grid is None:
-        if not cache_error or time.time() - _STARTED < STARTUP_GRACE:
+    if data is None:
+        if not error or time.time() - dashboard._STARTED < STARTUP_GRACE:
             return """
                 <div class='error' style='color: #888;'>
                     <div style='text-align: center; font-size: 0.8em; font-weight: normal;'>Stundenplan wird geladen …</div>
                 </div>"""
-        error_msg = cache_error
         return f"""
                 <div class='error'>
                     <div style='text-align: center;'>
                         <div style='font-size: 3em; margin-bottom: 20px;'>⚠️</div>
                         <div style='font-size: 1.5em; margin-bottom: 10px;'>Stundenplan konnte nicht geladen werden</div>
-                        <div style='font-size: 0.8em; color: #aaa;'>{error_msg}</div>
+                        <div style='font-size: 0.8em; color: #aaa;'>{escape(error)}</div>
                         <div style='font-size: 0.6em; color: #666; margin-top: 20px;'>Wird automatisch aktualisiert...</div>
                     </div>
                 </div>"""
 
+    today = date.today()
+    monday = today - timedelta(days=today.weekday())
+    week = [l for l in data["lessons"] if 0 <= (dashboard.int_date(l["date"]) - monday).days <= 4]
+    week = dashboard.hide_covered_by_events(week)
+    periods = build_periods(MASTER.periods, week)
     if not periods:
         return """
                 <div class='error' style='color: #888;'>
                     <div style='text-align: center; font-size: 0.8em; font-weight: normal;'>Keine Stunden in dieser Woche</div>
                 </div>"""
-
-    today_idx = date.today().weekday()
+    grid = week_grid(week, periods, monday)
     HOURS = list(range(len(periods)))
 
-    # Prüfe für jeden Tag, ob alle Stunden ausfallen
-    day_cancelled = {}
-    for d in range(5):
-        all_cancelled = True
-        for h in HOURS:
-            cell = grid[(d, h)]
-            # Wenn es Text gibt und nicht leer ist, findet Unterricht statt
-            if cell["text"] and cell["class"] != "empty":
-                all_cancelled = False
-                break
-        day_cancelled[d] = all_cancelled
+    # Tage ganz ohne Stunden (Feiertag, Ferien) -> eine große Box
+    no_school = {d: all(grid[(d, h)]["class"] == "empty" for h in HOURS) for d in range(5)}
 
     html = ""
     # Hinweis, wenn der letzte Abruf fehlgeschlagen ist und ein älterer Stand angezeigt wird
-    if cache_error and fetched_at:
+    if error and fetched_at:
         html += f"<div class='stale'>⚠ Untis nicht erreichbar – Stand {fetched_at.strftime('%H:%M')}</div>"
-    html += "<table><tr><th id='clock'></th>"
+    # viele Zeilen (z. B. Nachmittagsunterricht bis abends) -> Zellen etwas kompakter
+    html += f"<table class='{'compact' if len(periods) > 9 else ''}'><tr><th id='clock'></th>"
 
     for i, d in enumerate(DAYS):
-        day_date = (start_of_week + timedelta(days=i)).strftime("%d.%m")
-        cls = "today" if i == today_idx else ""
+        day_date = (monday + timedelta(days=i)).strftime("%d.%m")
+        cls = "today" if i == today.weekday() else ""
         html += f'<th class="{cls}">{d}<span class="date">{day_date}</span></th>'
     html += "</tr>"
 
     for h in HOURS:
         html += f"<tr><th>{periods[h]['label']}<br>{periods[h]['time']}</th>"
         for d in range(5):
-            if day_cancelled[d]:
-                # Ganzer Tag fällt aus - zeige nur in der ersten Stunde die große Box
+            if no_school[d]:
+                # nur in der ersten Stunde die große Box (rowspan deckt den Rest ab)
                 if h == HOURS[0]:
                     html += f'<td class="no-school" rowspan="{len(HOURS)}">Kein Unterricht</td>'
-                # Für andere Stunden nichts hinzufügen (rowspan deckt alles ab)
             else:
-                # Normaler Unterricht
                 c = grid[(d, h)]
                 if c["rowspan"] > 0:
                     rowspan_attr = f' rowspan="{c["rowspan"]}"' if c["rowspan"] > 1 else ""
@@ -749,7 +399,6 @@ document.addEventListener('keydown', function(e) {{
 if __name__ == "__main__":
     if config.demo(CFG):
         print("DEMO-Modus: erfundene Beispieldaten (kein Untis-Login)", flush=True)
-    threading.Thread(target=fetch_loop, daemon=True).start()
     dashboard.start()
     thermal.start()
     app.run(host="0.0.0.0", port=_args.port or int(CFG["PORT"] or 5000), debug=False)
