@@ -78,7 +78,7 @@ Nothing is written until you press `s`; then the web server is restarted and the
 right away. `./install.sh --configure --wizard` walks through every step instead. To add or remove
 extras (buttons, fan, updates, boot animation), run `./install.sh` again.
 
-To update: `git pull && ./install.sh`.
+To update: `git pull && ./install.sh`. What changed is in the [changelog](CHANGELOG.md).
 
 ## Try it without a Pi
 
@@ -100,6 +100,16 @@ calendar, so treat it like a password. Event colours come from keywords in the t
 (*Arbeit/Test/Klausur* green, *Ferien* blue, *Geburtstag* red, *Ausflug/Konzert* yellow; see
 `CALENDAR_COLOR_RULES` in `app/dashboard.py`).
 
+## Screen schedule
+
+So the screen isn't lit all night and weekend, raspy switches it off when nobody needs it:
+
+- **Mon–Fri during school hours** (default 07:30–16:00) the screen is always on.
+- **At other times** it turns off after 10 minutes without a button press. Any button (or a keyboard/mouse) wakes it up.
+
+Change the times or turn the schedule off with `./install.sh --configure` → **Screen schedule**.
+When it is off, the screen stays on all the time. The change takes effect immediately.
+
 ## Buttons
 
 Two push buttons, each between a GPIO pin and GND (internal pull-up, no resistors needed).
@@ -115,7 +125,8 @@ If system updates are running, holding Power first finishes the current package 
 
 ## Configuration
 
-All settings are in `config.env` (see [`config.example.env`](config.example.env)). After editing by
+The easiest way to change settings is the menu: `./install.sh --configure` (see [Install](#install)).
+All settings are stored in `config.env` (see [`config.example.env`](config.example.env)). After editing it by
 hand: `sudo systemctl restart raspy-web`.
 
 | Setting | Meaning |
