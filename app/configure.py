@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Interactive setup for config.env – asks for your school, Untis login, class,
-optional calendar and weather, tests everything and writes config.env.
+Interactive setup for config.env – school, Untis login, class, optional calendar
+and weather, screen schedule; tests everything and writes config.env.
 
-    python3 app/configure.py              full setup (re-run any time to change things)
+    python3 app/configure.py              menu: pick only what you want to change
+                                          (step-by-step setup if there is no config.env yet)
+    python3 app/configure.py --wizard     step-by-step through everything
     python3 app/configure.py --check      only test the current config.env
-    python3 app/configure.py --screen     also ask for the screen-on hours
-    python3 app/configure.py --buttons    also ask for the button GPIO pins
+    python3 app/configure.py --buttons    also offer the button GPIO pins
 
 install.sh runs this for you. Press Enter to keep the value shown in [brackets].
 """
@@ -80,9 +81,8 @@ def parse_untis_url(s):
     return u.hostname, (q.get("school") or [None])[0]
 
 
-def step_school(cfg):
-    heading("1/5  School")
-    if cfg["UNTIS_SERVER"] and cfg["UNTIS_SCHOOL"]:
+def step_school(cfg, offer_keep=True):
+    if offer_keep and cfg["UNTIS_SERVER"] and cfg["UNTIS_SCHOOL"]:
         print(f"  Current: {bold(cfg['UNTIS_SCHOOL'])} on {cfg['UNTIS_SERVER']}")
         if yes("Keep this school?"):
             return
@@ -121,7 +121,6 @@ def step_school(cfg):
 
 def step_login(cfg):
     """Asks for username/password until the login works. Returns an open session or None."""
-    heading("2/5  Untis login")
     print("  The same username and password you use in the Untis app.")
     print("  " + c("2", "Tip: a separate account just for the display is ideal, if your school offers one."))
     while True:
@@ -144,8 +143,24 @@ def step_login(cfg):
                 return None
 
 
+def open_session(cfg):
+    """Logs in with the saved username/password; asks again only if that fails."""
+    if cfg["UNTIS_SERVER"] and cfg["UNTIS_USER"] and cfg["UNTIS_PASSWORD"]:
+        client = untis.UntisClient(cfg["UNTIS_SERVER"], cfg["UNTIS_SCHOOL"], cfg["UNTIS_USER"], cfg["UNTIS_PASSWORD"])
+        try:
+            client.__enter__()
+            return client
+        except Exception as e:
+            err(f"Saved login does not work: {friendly(e)}")
+    return step_login(cfg)
+
+
+def close(u):
+    if u is not None:
+        u.__exit__()
+
+
 def step_class(cfg, u):
-    heading("3/5  Class")
     if u is None:
         cfg["UNTIS_CLASS"] = ask("Class name (e.g. 7a)", cfg["UNTIS_CLASS"])
         return
@@ -176,8 +191,18 @@ def step_class(cfg, u):
         warn(f"Timetable for {k['name']} could not be loaded: {friendly(e)}")
 
 
+def step_duty(cfg):
+    print("  The class duty shown on the Today page, named exactly as in Untis.")
+    v = input(f"  Class duty [{cfg['DUTY_LABEL'] or 'hidden'}] (Enter = keep, - = hide): ").strip()
+    if v == "-":
+        cfg["DUTY_LABEL"] = ""
+        ok("Class duty hidden")
+    elif v:
+        cfg["DUTY_LABEL"] = v
+        ok(f"Class duty: {v}")
+
+
 def step_calendar(cfg):
-    heading("4/5  Calendar (optional)")
     print("  Shows upcoming dates (tests, trips, holidays …) in a third column.")
     print("  Paste a secret iCal address – Google Calendar: Settings → your calendar →")
     print("  „Secret address in iCal format“. iCloud/Outlook links work too.")
@@ -208,7 +233,6 @@ def step_calendar(cfg):
 
 
 def step_weather(cfg):
-    heading("5/5  Weather (optional)")
     if cfg["WEATHER_LAT"]:
         print(f"  Current: {cfg['WEATHER_PLACE'] or (cfg['WEATHER_LAT'] + ', ' + cfg['WEATHER_LON'])}")
     hint = "Enter = keep, - = no weather" if cfg["WEATHER_LAT"] else "Enter = no weather"
@@ -243,23 +267,43 @@ def hhmm_ok(v):
     return len(v) == 4 and v.isdigit() and int(v[:2]) < 24 and int(v[2:]) < 60
 
 
+def screen_on(cfg):
+    return str(cfg["SCREEN_SCHEDULE"]).lower() not in ("0", "no", "false", "off")
+
+
+def idle_minutes(cfg):
+    v = str(cfg["SCREEN_IDLE_OFF"])
+    return str(max(1, int(v) // 60)) if v.isdigit() else "10"
+
+
 def step_screen(cfg):
-    heading("Screen schedule")
-    print("  Mon–Fri during school hours the screen stays on; otherwise it turns off when idle")
-    print("  (any button wakes it up).")
+    print("  With the screen schedule the screen stays on Mon–Fri during school hours and turns off")
+    print("  when idle at other times (any button wakes it up). Without it, the screen is always on.")
+    if not yes("Use the screen schedule?", screen_on(cfg)):
+        cfg["SCREEN_SCHEDULE"] = "0"
+        ok("Screen stays on all the time")
+        return
+    cfg["SCREEN_SCHEDULE"] = "1"
     for key, label in (("SCREEN_ON_FROM", "Always on from (HHMM)"), ("SCREEN_ON_UNTIL", "until (HHMM)")):
         while True:
-            v = ask(label, cfg[key]).replace(":", "")
-            if hhmm_ok(v):
+            v = ask(label, cfg[key]).replace(":", "").replace(".", "").zfill(4)
+            if not hhmm_ok(v):
+                err("Please enter a time like 0730 or 7:30")
+            elif key == "SCREEN_ON_UNTIL" and v <= cfg["SCREEN_ON_FROM"]:
+                err(f"Must be later than {cfg['SCREEN_ON_FROM']}")
+            else:
                 cfg[key] = v
                 break
-            err("Please use 4 digits, e.g. 0730")
-    v = ask("Outside those hours: turn off after how many idle minutes", str(int(cfg["SCREEN_IDLE_OFF"]) // 60))
-    cfg["SCREEN_IDLE_OFF"] = str(int(v) * 60) if v.isdigit() else cfg["SCREEN_IDLE_OFF"]
+    while True:
+        v = ask("Outside those hours: turn off after how many idle minutes", idle_minutes(cfg))
+        if v.isdigit() and int(v) > 0:
+            cfg["SCREEN_IDLE_OFF"] = str(int(v) * 60)
+            break
+        err("Please enter a number of minutes, e.g. 10")
+    ok(screen_summary(cfg))
 
 
 def step_buttons(cfg):
-    heading("Buttons")
     print("  Two push buttons between a GPIO pin and GND (internal pull-up).")
     cfg["BUTTON_TAB_GPIO"] = ask("GPIO of the tab button (switch view)", cfg["BUTTON_TAB_GPIO"])
     cfg["BUTTON_POWER_GPIO"] = ask("GPIO of the power button (hold to shut down)", cfg["BUTTON_POWER_GPIO"])
@@ -276,8 +320,10 @@ SECTIONS = [
      "Secret iCal address (Google/iCloud/Outlook). Empty = two-column layout without calendar."),
     ("Weather (optional, Open-Meteo, no API key)", ["WEATHER_LAT", "WEATHER_LON", "WEATHER_PLACE"],
      "Empty = no weather."),
-    ("Screen schedule (device/screen_schedule.sh)", ["SCREEN_ON_FROM", "SCREEN_ON_UNTIL", "SCREEN_IDLE_OFF"],
-     "Mon–Fri between FROM and UNTIL (HHMM) the screen stays on; otherwise off after IDLE_OFF seconds."),
+    ("Screen schedule (device/screen_schedule.sh)",
+     ["SCREEN_SCHEDULE", "SCREEN_ON_FROM", "SCREEN_ON_UNTIL", "SCREEN_IDLE_OFF"],
+     "SCREEN_SCHEDULE=1: Mon–Fri between FROM and UNTIL (HHMM) the screen stays on; otherwise off after\n"
+     "IDLE_OFF seconds without a button press. SCREEN_SCHEDULE=0: the screen is always on."),
     ("Hardware", ["BUTTON_TAB_GPIO", "BUTTON_POWER_GPIO", "PORT"], "BCM GPIO numbers; PORT of the web server."),
 ]
 
@@ -343,30 +389,136 @@ def untis_time(v):
     return f"{v // 100}:{v % 100:02d}"
 
 
+# ───────────────────────── wizard + menu ─────────────────────────
+def wizard(cfg, buttons):
+    """Step by step through everything (first setup)."""
+    titles = ["School", "Untis login", "Class", "Calendar (optional)", "Weather (optional)", "Screen schedule"]
+    titles += ["Buttons"] if buttons else []
+    steps = iter(enumerate(titles, 1))
+
+    def head():
+        i, t = next(steps)
+        heading(f"{i}/{len(titles)}  {t}")
+
+    head(); step_school(cfg)
+    head(); u = step_login(cfg)
+    head(); step_class(cfg, u); close(u)
+    head(); step_calendar(cfg)
+    head(); step_weather(cfg)
+    head(); step_screen(cfg)
+    if buttons:
+        head(); step_buttons(cfg)
+
+
+def do_school(cfg):
+    old = (cfg["UNTIS_SERVER"], cfg["UNTIS_SCHOOL"])
+    step_school(cfg, offer_keep=False)
+    if (cfg["UNTIS_SERVER"], cfg["UNTIS_SCHOOL"]) != old:   # andere Schule: Login + Klasse passen nicht mehr
+        heading("Untis login")
+        u = step_login(cfg)
+        heading("Class")
+        step_class(cfg, u)
+        close(u)
+
+
+def do_login(cfg):
+    close(step_login(cfg))
+
+
+def do_class(cfg):
+    u = open_session(cfg)
+    step_class(cfg, u)
+    close(u)
+
+
+def screen_summary(cfg):
+    if not screen_on(cfg):
+        return "off – screen always on"
+    t = lambda v: f"{v[:2]}:{v[2:]}" if hhmm_ok(v) else v  # noqa: E731
+    return (f"Mon–Fri {t(cfg['SCREEN_ON_FROM'])}–{t(cfg['SCREEN_ON_UNTIL'])} on, "
+            f"otherwise off after {idle_minutes(cfg)} min idle")
+
+
+def menu_items(buttons):
+    dim = lambda s: c("2", s)  # noqa: E731
+    items = [
+        ("School", lambda g: f"{g['UNTIS_SCHOOL']} on {g['UNTIS_SERVER']}"
+         if g["UNTIS_SCHOOL"] else dim("not set"), do_school),
+        ("Login", lambda g: (g["UNTIS_USER"] or dim("not set")) + ("" if g["UNTIS_PASSWORD"] else dim(" (no password)")),
+         do_login),
+        ("Class", lambda g: g["UNTIS_CLASS"] or (f"ID {g['UNTIS_CLASS_ID']}" if g["UNTIS_CLASS_ID"] else dim("not set")),
+         do_class),
+        ("Class duty", lambda g: g["DUTY_LABEL"] or dim("hidden"), step_duty),
+        ("Calendar", lambda g: "on" if g["CALENDAR_ICS_URL"] else dim("off"), step_calendar),
+        ("Weather", lambda g: (g["WEATHER_PLACE"] or f"{g['WEATHER_LAT']}, {g['WEATHER_LON']}")
+         if g["WEATHER_LAT"] else dim("off"), step_weather),
+        ("Screen schedule", screen_summary, step_screen),
+    ]
+    if buttons:
+        items.append(("Buttons", lambda g: f"tab = GPIO {g['BUTTON_TAB_GPIO']}, power = GPIO {g['BUTTON_POWER_GPIO']}",
+                      step_buttons))
+    return items
+
+
+def menu(cfg, buttons):
+    """Pick only what you want to change; saves at the end. Returns True if something was saved."""
+    items = menu_items(buttons)
+    saved = dict(cfg)
+    while True:
+        dirty = cfg != saved
+        heading("raspy settings" + (c("33", "  – unsaved changes") if dirty else ""))
+        for i, (title, show, _) in enumerate(items, 1):
+            print(f"   {i}  {title:<16} {show(cfg)}")
+        print()
+        print("   t  Test the settings")
+        print("   s  Save and exit" if dirty else c("2", "   s  Save and exit (nothing changed)"))
+        print("   q  Quit without saving")
+        v = input("  Choose: ").strip().lower()
+        action = None
+        if v == "t":
+            action = check
+        elif v.isdigit() and 1 <= int(v) <= len(items):
+            title, _, action = items[int(v) - 1]
+            heading(title)
+        if action:
+            before = dict(cfg)
+            try:
+                action(cfg)
+            except KeyboardInterrupt:      # Strg+C in einem Punkt: nur diesen Punkt abbrechen
+                cfg.clear()
+                cfg.update(before)
+                print("\n  Cancelled – back to the menu.")
+        elif v == "s":
+            if dirty:
+                write_config(cfg)
+                heading("Saved")
+                ok(f"{config.CONFIG_FILE} (only readable by you)")
+            else:
+                print("  Nothing changed.")
+            return dirty
+        elif v == "q":
+            if not dirty or yes("Discard your changes?", False):
+                print("  Nothing was saved.")
+                return False
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--check", action="store_true", help="only test the current config.env")
-    ap.add_argument("--screen", action="store_true", help="also ask for the screen-on hours")
-    ap.add_argument("--buttons", action="store_true", help="also ask for the button GPIO pins")
+    ap.add_argument("--wizard", action="store_true", help="step by step through everything instead of the menu")
+    ap.add_argument("--buttons", action="store_true", help="also offer the button GPIO pins")
     a = ap.parse_args()
 
     cfg = config.load()
     if a.check:
         sys.exit(0 if check(cfg) else 1)
 
-    print(bold("raspy setup") + f" – writes {config.CONFIG_FILE}")
+    print(bold("raspy setup") + f" – {config.CONFIG_FILE}")
     try:
-        step_school(cfg)
-        u = step_login(cfg)
-        step_class(cfg, u)
-        if u is not None:
-            u.__exit__()
-        step_calendar(cfg)
-        step_weather(cfg)
-        if a.screen:
-            step_screen(cfg)
-        if a.buttons:
-            step_buttons(cfg)
+        if cfg["_exists"] and not a.wizard:
+            menu(cfg, a.buttons)
+            return
+        wizard(cfg, a.buttons)
     except (KeyboardInterrupt, EOFError):
         print("\n  Cancelled – nothing was saved.")
         sys.exit(130)

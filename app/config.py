@@ -21,6 +21,7 @@ DEFAULTS = {
     "WEATHER_LAT": "",           # optional: leer = kein Wetter
     "WEATHER_LON": "",
     "WEATHER_PLACE": "",
+    "SCREEN_SCHEDULE": "1",      # 0 = Bildschirm immer an (kein Zeitplan)
     "SCREEN_ON_FROM": "0730",    # Mo–Fr in dieser Zeit bleibt der Bildschirm an
     "SCREEN_ON_UNTIL": "1600",
     "SCREEN_IDLE_OFF": "600",    # sonst nach so vielen Sekunden aus

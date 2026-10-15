@@ -2,7 +2,7 @@
 # raspy installer – run on the Raspberry Pi as your normal desktop user (not with sudo):
 #
 #   ./install.sh               install, or update after `git pull` (keeps your config.env)
-#   ./install.sh --configure   only change settings (school, login, class, calendar, weather)
+#   ./install.sh --configure   change settings in a menu (school, login, class, calendar, weather, screen …)
 #   ./install.sh --uninstall   remove the services and system changes again
 #
 # Needs Raspberry Pi OS with desktop (Debian 12/13). Asks for sudo when it needs it.
@@ -46,8 +46,8 @@ setting() {  # Wert aus config.env (ohne Anführungszeichen)
 # shellcheck source=/dev/null
 load_state() { [ -f "$STATE" ] && . "$STATE" || true; }
 save_state() {
-  printf 'F_BUTTONS=%s\nF_FAN=%s\nF_SCREEN=%s\nF_UPDATES=%s\nF_BOOT=%s\n' \
-    "$F_BUTTONS" "$F_FAN" "$F_SCREEN" "$F_UPDATES" "$F_BOOT" > "$STATE"
+  printf 'F_BUTTONS=%s\nF_FAN=%s\nF_UPDATES=%s\nF_BOOT=%s\n' \
+    "$F_BUTTONS" "$F_FAN" "$F_UPDATES" "$F_BOOT" > "$STATE"
 }
 
 unit_on()  { sudo systemctl daemon-reload; sudo systemctl enable "$@" >/dev/null 2>&1; }
@@ -171,14 +171,18 @@ remove_fan() {
   if [ -f "$BOOT/config.txt" ]; then sysedit unblock "$BOOT/config.txt" "raspy fan"; fi
 }
 
-install_screen() {
+install_screen() {   # immer installiert; an/aus und Zeiten stehen in config.env (SCREEN_SCHEDULE …)
   say "Screen schedule"
   { crontab -l 2>/dev/null | grep -v 'raspy:screen' || true
     echo "*/5 * * * * $DIR/device/screen_schedule.sh # raspy:screen"
     echo "@reboot sleep 45 && $DIR/device/screen_schedule.sh # raspy:screen"
   } | crontab -
+  "$DIR/device/screen_schedule.sh" || true   # sofort anwenden (tut nichts, solange kein Desktop läuft)
   local idle; idle=$(setting SCREEN_IDLE_OFF)
-  ok "Mon–Fri $(setting SCREEN_ON_FROM)–$(setting SCREEN_ON_UNTIL) always on, otherwise off after $(( ${idle:-600} / 60 )) min idle"
+  case "$(setting SCREEN_SCHEDULE)" in
+    0|no|false|off) ok "Screen always on (change with ./install.sh --configure)" ;;
+    *) ok "Mon–Fri $(setting SCREEN_ON_FROM)–$(setting SCREEN_ON_UNTIL) always on, otherwise off after $(( ${idle:-600} / 60 )) min idle" ;;
+  esac
 }
 remove_screen() {
   { crontab -l 2>/dev/null | grep -v 'raspy:screen' || true; } | crontab -
@@ -258,11 +262,19 @@ remove_boot() {
   sudo update-initramfs -u >/dev/null
 }
 
-configure() {
+configure() {   # Menü, wenn config.env schon existiert, sonst Schritt für Schritt
   local flags=()
-  [ "${F_SCREEN:-n}" = y ] && flags+=(--screen)
   [ "${F_BUTTONS:-n}" = y ] && flags+=(--buttons)
-  "$DIR/venv/bin/python" "$DIR/app/configure.py" "${flags[@]}" </dev/tty
+  "$DIR/venv/bin/python" "$DIR/app/configure.py" "${flags[@]}" "$@" </dev/tty
+}
+
+# Früher war der Bildschirm-Zeitplan ein Extra (F_SCREEN in .install-state), jetzt ist es SCREEN_SCHEDULE
+# in config.env. Wer ihn damals abgewählt hat, bekommt SCREEN_SCHEDULE=0 (Bildschirm immer an).
+migrate_screen() {
+  if [ "${F_SCREEN:-}" = n ] && [ -f "$DIR/config.env" ] && ! grep -q '^SCREEN_SCHEDULE=' "$DIR/config.env"; then
+    printf '\nSCREEN_SCHEDULE=0\n' >> "$DIR/config.env"
+  fi
+  F_SCREEN=""
 }
 
 # ───────────────────────── modes ─────────────────────────
@@ -281,9 +293,13 @@ fi
 
 if [ "${1:-}" = "--configure" ]; then
   [ -x "$DIR/venv/bin/python" ] || die "Run ./install.sh first."
-  configure
+  migrate_screen
+  before=$(cksum < "$DIR/config.env" 2>/dev/null || true)
+  configure "${@:2}"
+  [ "$(cksum < "$DIR/config.env" 2>/dev/null || true)" != "$before" ] || exit 0
   sudo systemctl restart raspy-web.service && ok "Web server restarted"
   [ "${F_BUTTONS:-n}" = y ] && sudo systemctl restart raspy-buttons.service || true
+  install_screen
   exit 0
 fi
 
@@ -301,7 +317,6 @@ if [ "$IS_PI5" = y ]; then
 else
   F_FAN=n
 fi
-ask_yn "Screen schedule (on during school hours, off when idle otherwise)?" "$(def "$F_SCREEN" y)" && F_SCREEN=y || F_SCREEN=n
 ask_yn "Automatic system updates (Tuesdays 09:45, safe to interrupt)?" "$(def "$F_UPDATES" y)" && F_UPDATES=y || F_UPDATES=n
 ask_yn "Custom boot animation (changes boot settings – advanced)?" "$(def "$F_BOOT" n)" && F_BOOT=y || F_BOOT=n
 [ "$IS_PI" = y ] || [ "$F_BUTTONS$F_BOOT" = nn ] || warn "This does not look like a Raspberry Pi – buttons/boot animation may not work."
@@ -326,6 +341,7 @@ say "Python environment"
 ok "venv ready ($DIR/venv, packages from app/requirements.txt)"
 
 say "Settings"
+migrate_screen
 if [ -f "$DIR/config.env" ] && ! ask_yn "config.env already exists – change settings now?" n; then
   ok "Keeping config.env"
 else
@@ -337,7 +353,7 @@ install_web
 install_kiosk
 if [ "$F_BUTTONS" = y ]; then install_buttons; else remove_buttons; fi
 if [ "$F_FAN" = y ];     then install_fan;     else remove_fan; fi
-if [ "$F_SCREEN" = y ];  then install_screen;  else remove_screen; fi
+install_screen
 if [ "$F_UPDATES" = y ]; then install_updates; else remove_updates; fi
 if [ "$F_BOOT" = y ];    then install_boot;    else remove_boot; fi
 [ "$F_BUTTONS$F_FAN$F_UPDATES" = nnn ] && sudo rm -f /etc/sudoers.d/raspy

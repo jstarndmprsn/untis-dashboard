@@ -23,8 +23,9 @@ The display itself is in German (that's where WebUntis is used most); setup and 
 - **Optional weather** via [Open-Meteo](https://open-meteo.com) (no API key).
 - **Week view** (`/`) – the whole week; rows come from your school's own period times.
 - **Keeps working when the Wi-Fi drops** – shows the last known state with a "Stand HH:MM" hint.
+- **Screen schedule** – always on during school hours, off when idle otherwise (or simply always on).
 - Pi extras (all optional): **two hardware buttons** (switch view / hold to shut down),
-  **smooth fan curve + overheat protection** (Pi 5), **screen schedule**, **weekly auto-updates**
+  **smooth fan curve + overheat protection** (Pi 5), **weekly auto-updates**
   that are safe to interrupt, and a **custom boot animation**.
 
 ## What you need
@@ -45,17 +46,39 @@ cd untis-dashboard
 
 The installer asks a few questions and does the rest:
 
-1. **Which extras** you want (buttons, fan control, screen schedule, auto-updates, boot animation).
+1. **Which extras** you want (buttons, fan control, auto-updates, boot animation).
 2. **Your school** – type its name and pick it from the list (same search as the Untis app),
    or paste the address of your WebUntis login page.
 3. **Username and password** – tested right away; the password is typed hidden.
 4. **Your class** – your own class is suggested automatically.
 5. **Calendar** (optional) and **town for the weather** (optional).
+6. **Screen schedule** – when the screen should stay on, or keep it on all the time.
 
 Everything ends up in `config.env` (only readable by your user, never committed). Then it
 installs the services, sets Chromium to start in full screen after login, and reboots.
 
-Change settings later with `./install.sh --configure`. To update: `git pull && ./install.sh`.
+Change settings later with `./install.sh --configure`. It opens a menu, so you only change what you need:
+
+```
+raspy settings
+   1  School           gym-musterstadt on xyz.webuntis.com
+   2  Login            display7a
+   3  Class            7a
+   4  Class duty       Klassenordner
+   5  Calendar         on
+   6  Weather          Musterstadt
+   7  Screen schedule  Mon–Fri 07:30–16:00 on, otherwise off after 10 min idle
+
+   t  Test the settings
+   s  Save and exit
+   q  Quit without saving
+```
+
+Nothing is written until you press `s`; then the web server is restarted and the screen schedule applied
+right away. `./install.sh --configure --wizard` walks through every step instead. To add or remove
+extras (buttons, fan, updates, boot animation), run `./install.sh` again.
+
+To update: `git pull && ./install.sh`.
 
 ## Try it without a Pi
 
@@ -103,6 +126,7 @@ hand: `sudo systemctl restart raspy-web`.
 | `DUTY_LABEL` | class duty to show (as named in Untis, default `Klassenordner`; empty = hide) |
 | `CALENDAR_ICS_URL` | optional iCal link; empty = no calendar column |
 | `WEATHER_LAT`, `WEATHER_LON` | optional; empty = no weather |
+| `SCREEN_SCHEDULE` | `1` = use the screen schedule below, `0` = screen always on |
 | `SCREEN_ON_FROM`, `SCREEN_ON_UNTIL`, `SCREEN_IDLE_OFF` | screen always on Mon–Fri in this window, otherwise off after N seconds idle |
 | `BUTTON_TAB_GPIO`, `BUTTON_POWER_GPIO`, `PORT` | hardware pins, web server port |
 
