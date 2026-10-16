@@ -11,8 +11,8 @@ jobs:
       matrix:
         python: ["3.11", "3.13"]     # Raspberry Pi OS 12 (bookworm) / 13 (trixie)
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
       - name: Install
@@ -25,6 +25,9 @@ jobs:
   shellcheck:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+      # feste Version (nicht die vom Ubuntu-Image) – lokal genauso prüfbar: pip install shellcheck-py==0.10.0.1
+      - name: Install shellcheck
+        run: pip install shellcheck-py==0.10.0.1
       - name: shellcheck
         run: shellcheck install.sh device/kiosk.sh device/screen_schedule.sh system/raspy-update system/raspy-display-setup

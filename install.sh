@@ -44,7 +44,7 @@ setting() {  # Wert aus config.env (ohne Anführungszeichen)
 }
 
 # shellcheck source=/dev/null
-load_state() { [ -f "$STATE" ] && . "$STATE" || true; }
+load_state() { if [ -f "$STATE" ]; then . "$STATE"; fi; }
 save_state() {
   printf 'F_BUTTONS=%s\nF_FAN=%s\nF_UPDATES=%s\nF_BOOT=%s\n' \
     "$F_BUTTONS" "$F_FAN" "$F_UPDATES" "$F_BOOT" > "$STATE"
@@ -300,7 +300,7 @@ if [ "${1:-}" = "--configure" ]; then
   configure "${@:2}"
   [ "$(cksum < "$DIR/config.env" 2>/dev/null || true)" != "$before" ] || exit 0
   sudo systemctl restart raspy-web.service && ok "Web server restarted"
-  [ "${F_BUTTONS:-n}" = y ] && sudo systemctl restart raspy-buttons.service || true
+  if [ "${F_BUTTONS:-n}" = y ]; then sudo systemctl restart raspy-buttons.service || true; fi
   install_screen
   exit 0
 fi
