@@ -14,7 +14,11 @@ Notabschaltung:
   3. Fällt die Temperatur währenddessen unter ABORT_TEMP -> Abbruch
   4. Sonst: sudo shutdown now
 
-Zustand wird nach /tmp/thermal_guard.json geschrieben (Anzeige im Thermal-Dashboard).
+Zustand wird nach /run/raspy/thermal_guard.json geschrieben (Anzeige im Thermal-Dashboard).
+
+Beim Beenden wird der Lüfter wieder dem Kernel übergeben (ursprünglicher pwm1_enable-Wert),
+damit die Kernel-Kurve als Sicherung greift. Nach einem Absturz erledigt das ExecStopPost
+in raspy-thermal.service mit der Datei /run/raspy/fan-restore.
 
 Test ohne echte Hitze und ohne echten Shutdown:
   python3 thermal_guard.py --dry-run --fake-temp-file /tmp/faketemp
@@ -23,9 +27,13 @@ Test ohne echte Hitze und ohne echten Shutdown:
 import argparse
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app"))
+import config  # noqa: E402
 
 CRIT_TEMP = 85.0       # ab hier kritisch (Pi 5 drosselt selbst ab ~85 °C)
 CRIT_SECONDS = 10      # so lange muss es kritisch bleiben, bevor gewarnt wird
@@ -40,7 +48,9 @@ FAN_STEP_UP = 3        # max. PWM-Änderung pro Sekunde nach oben (sanft)
 FAN_STEP_DOWN = 1      # nach unten noch langsamer (kein Pendeln)
 FAN_SMOOTH = 0.15      # Glättung der Temperatur (EMA)
 
-STATE_FILE = "/tmp/thermal_guard.json"
+RUN_DIR = config.run_dir()
+STATE_FILE = os.path.join(RUN_DIR, "thermal_guard.json")
+RESTORE_FILE = os.path.join(RUN_DIR, "fan-restore")   # "<pfad zu pwm1_enable> <wert>" für ExecStopPost
 OVERLAY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "overheat_overlay.py")
 DISPLAY_ENV = {**os.environ, "DISPLAY": ":0", "XAUTHORITY": os.path.expanduser("~/.Xauthority")}
 
@@ -80,6 +90,30 @@ class Fan:
                 pass
         self.pwm = None
         self.smooth_temp = None
+        self.orig_enable = None
+        if self.dir:
+            try:
+                v = open(os.path.join(self.dir, "pwm1_enable")).read().strip()
+                # "1" = manuell, z. B. von einem abgestürzten Lauf übrig -> dann Automatik (2)
+                self.orig_enable = v if v and v != "1" else "2"
+            except OSError:
+                self.orig_enable = "2"
+            try:
+                with open(RESTORE_FILE, "w") as f:
+                    f.write(f"{os.path.join(self.dir, 'pwm1_enable')} {self.orig_enable}\n")
+            except OSError as e:
+                print(f"Wiederherstellungs-Datei nicht geschrieben: {e}")
+
+    def restore(self):
+        """Lüfter wieder dem Kernel übergeben (dessen Kurve ist die Notfall-Sicherung)."""
+        if self.dir is None or self.orig_enable is None:
+            return
+        try:
+            with open(os.path.join(self.dir, "pwm1_enable"), "w") as f:
+                f.write(self.orig_enable)
+            print(f"Lüfter an Kernel zurückgegeben (pwm1_enable={self.orig_enable})")
+        except OSError as e:
+            print(f"Lüfter konnte nicht zurückgegeben werden: {e}")
 
     def update(self, temp):
         if self.dir is None or temp is None:
@@ -163,6 +197,18 @@ def main():
     # Test-Instanzen (dry-run/fake) steuern nie den echten Lüfter
     fan = None if (a.no_fan or a.dry_run or a.fake_temp_file) else Fan()
 
+    # systemctl stop / Herunterfahren schickt SIGTERM -> sauber beenden (finally gibt den Lüfter zurück)
+    def stop(signum, frame):
+        raise SystemExit(0)
+    signal.signal(signal.SIGTERM, stop)
+    try:
+        run(a, fan)
+    finally:
+        if fan:
+            fan.restore()
+
+
+def run(a, fan):
     state, crit_since, end_at, overlay = "ok", None, None, None
     print(f"Überhitzungsschutz aktiv: kritisch ab {CRIT_TEMP} °C ({CRIT_SECONDS} s), "
           f"Countdown {COUNTDOWN} s, Abbruch unter {ABORT_TEMP} °C" + (" [DRY-RUN]" if a.dry_run else ""))

@@ -32,7 +32,6 @@ button2 = Button(int(CFG['BUTTON_POWER_GPIO']), pull_up=True)
 
 time.sleep(2)
 
-SCREEN_FLAG  = '/tmp/screen_off'
 DISPLAY_ENV  = {**os.environ, 'DISPLAY': ':0', 'XAUTHORITY': os.path.expanduser('~/.Xauthority')}
 CHROMIUM     = shutil.which('chromium') or shutil.which('chromium-browser') or 'chromium'
 
@@ -58,9 +57,7 @@ THERMAL_PROFILE = os.path.expanduser('~/.config/chromium-thermal')   # eigenes P
 THERMAL_MAX_OPEN = 600  # nach 10 min automatisch schließen
 
 def is_screen_off():
-    # Flag-Datei ODER X-eigenes DPMS (Monitor per screen_schedule.sh aus)
-    if os.path.exists(SCREEN_FLAG):
-        return True
+    # Monitor per DPMS aus (screen_schedule.sh bzw. Leerlauf)
     try:
         out = subprocess.run(['xset', 'q'], capture_output=True, text=True,
                              env=DISPLAY_ENV, timeout=2).stdout
@@ -72,8 +69,6 @@ def screen_on():
     print("Screen wird eingeschaltet", flush=True)
     subprocess.run(['xset', 'dpms', 'force', 'on'], capture_output=True, env=DISPLAY_ENV)
     subprocess.run(['xset', 's', 'reset'],           capture_output=True, env=DISPLAY_ENV)
-    if os.path.exists(SCREEN_FLAG):
-        os.remove(SCREEN_FLAG)
 
 def updates_running():
     return os.path.exists(UPDATE_STATE)
@@ -251,9 +246,14 @@ def button_loop():
         prev1, prev2 = p1, p2
         time.sleep(0.01)
 
-t = threading.Thread(target=button_loop, daemon=True)
-t.start()
-
-print("Buttons aktiv...", flush=True)
-from signal import pause
-pause()
+if __name__ == "__main__":
+    print("Buttons aktiv...", flush=True)
+    # Schleife im Hauptprogramm: stürzt sie ab, endet der Prozess mit Fehler und systemd startet
+    # den Dienst neu (in einem Hintergrund-Thread wäre die Aus-Taste sonst still tot).
+    try:
+        button_loop()
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"Tastenschleife abgestürzt: {e} – Neustart durch systemd", flush=True)
+        os._exit(1)

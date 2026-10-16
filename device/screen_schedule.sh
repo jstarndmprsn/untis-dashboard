@@ -35,7 +35,6 @@ if [ "$MODE" = on ]; then
   xset dpms force on
   xset s off
   xset dpms 0 0 0
-  rm -f /tmp/screen_off
 else
   xset s off
   xset dpms "$IDLE_OFF" "$IDLE_OFF" "$IDLE_OFF"

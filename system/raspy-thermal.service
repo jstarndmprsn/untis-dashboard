@@ -5,6 +5,9 @@ After=multi-user.target
 [Service]
 User=@USER@
 ExecStart=/usr/bin/python3 @DIR@/device/thermal_guard.py
+# Lüfter wieder dem Kernel übergeben – auch nach einem Absturz (sonst bleibt der letzte PWM-Wert
+# stehen und die Kernel-Kurve greift nicht). thermal_guard.py schreibt "<pfad> <wert>" in fan-restore.
+ExecStopPost=/bin/sh -c 'read p v < /run/raspy/fan-restore && echo "$v" > "$p" || true'
 Restart=always
 RestartSec=5
 StandardOutput=journal

@@ -324,7 +324,9 @@ SECTIONS = [
      ["SCREEN_SCHEDULE", "SCREEN_ON_FROM", "SCREEN_ON_UNTIL", "SCREEN_IDLE_OFF"],
      "SCREEN_SCHEDULE=1: Mon–Fri between FROM and UNTIL (HHMM) the screen stays on; otherwise off after\n"
      "IDLE_OFF seconds without a button press. SCREEN_SCHEDULE=0: the screen is always on."),
-    ("Hardware", ["BUTTON_TAB_GPIO", "BUTTON_POWER_GPIO", "PORT"], "BCM GPIO numbers; PORT of the web server."),
+    ("Hardware", ["BUTTON_TAB_GPIO", "BUTTON_POWER_GPIO", "PORT", "LAN_ACCESS"],
+     "BCM GPIO numbers; PORT of the web server.\n"
+     "LAN_ACCESS=1: pages also reachable from other devices (no login – only on a network you trust)."),
 ]
 
 

@@ -1,5 +1,41 @@
 # Changelog
 
+## 2026-10-16 – Safer defaults, tests and CI
+
+### Security
+
+- **The secret calendar link no longer leaks.** Error messages used to contain the full iCal
+  address (the HTTP library puts it into its errors), and they were shown in `/api/heute` and the
+  log. Addresses are now removed from every stored or logged error.
+- **The pages are only reachable on the Pi itself by default.** The kiosk doesn't need more.
+  Set `LAN_ACCESS=1` in `config.env` to open them from other devices (no login – only on a network
+  you trust). The server now runs on waitress instead of Flask's development server.
+- **Wrong password: no more account lockouts.** After a rejected Untis login raspy only retries
+  every 30 minutes, and the screen says "Untis-Login abgelehnt – Passwort prüfen".
+- Only the display user can set the fan speed (instead of everyone).
+
+### Fixed
+
+- **The power button can't die silently any more.** If the button loop crashes, the service
+  exits and systemd restarts it.
+- **Fan safety net.** When the fan service stops or crashes, the fan is handed back to the
+  kernel's own curve instead of staying at its last speed.
+- The week view shows the coming week on Saturday and Sunday.
+- Double periods are recognised from your school's period times, so schools with breaks longer
+  than 20 minutes get merged cards too.
+
+### Changed
+
+- One Untis login session is kept between updates instead of logging in every 2 minutes.
+- Automatic system updates are off by default for new installs (your earlier choice is kept).
+- State files moved from `/tmp` to `/run/raspy`.
+- The week view is a normal template (`templates/woche.html`, `static/woche.*`); the table code
+  lives in `app/week.py`. Browsers reload automatically after an update (no manual version number).
+
+### New
+
+- Test suite (`python -m pytest`) and a GitHub Action that runs it together with `shellcheck`.
+
 ## 2026-10-15 – Settings menu and optional screen schedule
 
 ### New

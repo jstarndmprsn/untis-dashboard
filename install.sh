@@ -67,6 +67,8 @@ load_state
 # ───────────────────────── features: install / remove ─────────────────────────
 install_web() {
   say "Web server"
+  put "$DIR/system/raspy-tmpfiles.conf" /etc/tmpfiles.d/raspy.conf 644
+  sudo systemd-tmpfiles --create /etc/tmpfiles.d/raspy.conf
   put "$DIR/system/raspy-web.service" /etc/systemd/system/raspy-web.service 644
   unit_on raspy-web.service
   sudo systemctl restart raspy-web.service
@@ -102,8 +104,8 @@ install_kiosk() {
   if [[ $session != *-x ]]; then   # X11-Sitzung: rpd-x (Debian 13) bzw. LXDE-pi-x (Debian 12)
     warn "Your desktop runs on Wayland (session: ${session:-unknown}); raspy needs X11."
     if ask_yn "Switch to X11 now (raspi-config)?" y; then
-      sudo raspi-config nonint do_wayland W1 && ok "Switched to X11 (active after reboot)" \
-        || warn "Could not switch – use: sudo raspi-config → Advanced Options → Wayland → X11"
+      if sudo raspi-config nonint do_wayland W1; then ok "Switched to X11 (active after reboot)"
+      else warn "Could not switch – use: sudo raspi-config → Advanced Options → Wayland → X11"; fi
     fi
   else
     ok "Desktop session: X11"
@@ -111,8 +113,8 @@ install_kiosk() {
   local autologin; autologin=$(sysedit ini-get "$LIGHTDM" 'Seat:*' autologin-user)
   if [ "$autologin" != "$ME" ]; then
     if ask_yn "Log in automatically as $ME after boot (needed for the kiosk)?" y; then
-      sudo raspi-config nonint do_boot_behaviour B4 && ok "Desktop autologin for $ME" \
-        || warn "Could not enable – use: sudo raspi-config → System Options → Boot / Auto Login"
+      if sudo raspi-config nonint do_boot_behaviour B4; then ok "Desktop autologin for $ME"
+      else warn "Could not enable – use: sudo raspi-config → System Options → Boot / Auto Login"; fi
     fi
   else
     ok "Autologin as $ME"
@@ -284,7 +286,7 @@ if [ "${1:-}" = "--uninstall" ]; then
   sudo -v
   remove_boot; remove_updates; remove_screen; remove_fan; remove_buttons; remove_kiosk
   unit_off raspy-web.service
-  sudo rm -f /etc/sudoers.d/raspy
+  sudo rm -f /etc/sudoers.d/raspy /etc/tmpfiles.d/raspy.conf
   rm -f "$STATE"
   ok "Removed. Your settings (config.env) and this folder are still here – delete the folder to remove everything."
   ok "Backups of changed system files: /var/backups/raspy"
@@ -317,7 +319,8 @@ if [ "$IS_PI5" = y ]; then
 else
   F_FAN=n
 fi
-ask_yn "Automatic system updates (Tuesdays 09:45, safe to interrupt)?" "$(def "$F_UPDATES" y)" && F_UPDATES=y || F_UPDATES=n
+# Updates: Standard aus (unbeaufsichtigtes full-upgrade auf einem Kiosk) – frühere Wahl bleibt erhalten
+ask_yn "Automatic system updates (full-upgrade on Tuesdays 09:45, safe to interrupt)?" "$(def "$F_UPDATES" n)" && F_UPDATES=y || F_UPDATES=n
 ask_yn "Custom boot animation (changes boot settings – advanced)?" "$(def "$F_BOOT" n)" && F_BOOT=y || F_BOOT=n
 [ "$IS_PI" = y ] || [ "$F_BUTTONS$F_BOOT" = nn ] || warn "This does not look like a Raspberry Pi – buttons/boot animation may not work."
 
@@ -360,7 +363,11 @@ if [ "$F_BOOT" = y ];    then install_boot;    else remove_boot; fi
 
 PORT=$(setting PORT); PORT=${PORT:-5000}
 say "Done"
-echo "  Open from another device:  http://$(hostname -s 2>/dev/null || hostname).local:$PORT/heute   (week view: /)"
+if [ "$(setting LAN_ACCESS)" = 1 ]; then
+  echo "  Open from another device:  http://$(hostname -s 2>/dev/null || hostname).local:$PORT/heute   (week view: /)"
+else
+  echo "  Pages are only reachable on the Pi itself (set LAN_ACCESS=1 in config.env to open them from other devices)"
+fi
 echo "  Change settings later:     ./install.sh --configure"
 echo "  Logs:                      journalctl -u raspy-web -f"
 if ask_yn "Reboot now to start the kiosk?" y; then sudo reboot; fi

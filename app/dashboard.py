@@ -42,10 +42,8 @@ _STARTED = time.time()
 # Anzeige-Kürzel (Grundfach aus Untis-Namen wie "Mat (8-10)", "Bio B1", "BKu2")
 SUBJECT_ALIASES = {"BKu": "Kun"}
 
-# Fachfarben: in erster Linie die offiziellen aus Untis (Stammdaten, getSubjects -> backColor);
+# Fachfarben: in erster Linie die offiziellen aus Untis (MasterData.colors, getSubjects -> backColor);
 # diese Tabelle nur als Ersatz für Fächer ohne eingetragene Farbe
-UNTIS_COLORS = {}
-
 SUBJECT_COLORS = {
     "Mat": "#ff3b30", "Deu": "#f0e000", "Eng": "#dfa916", "Fra": "#ff9f0a", "Spa": "#ff6482",
     "Lat": "#3a2cff", "Bio": "#34c759", "Che": "#2e9e16", "Phy": "#c4bf7c", "Inf": "#a259ff",
@@ -75,10 +73,10 @@ def base_subject(name):
     return SUBJECT_ALIASES.get(base, base)
 
 
-def subject_color(name):
+def subject_color(name, official=None):
     """Offizielle Untis-Farbe (exakter Name wie "Mat (8-10)"), sonst Ersatztabelle."""
-    if name in UNTIS_COLORS:
-        return UNTIS_COLORS[name]
+    if official and name in official:
+        return official[name]
     base = base_subject(name)
     if base in SUBJECT_COLORS:
         return SUBJECT_COLORS[base]
@@ -108,6 +106,22 @@ def day_label(d, today):
     return f"{WEEKDAYS_SHORT[d.weekday()]} {d.day}.{d.month}."
 
 
+def week_monday(d):
+    """Montag der angezeigten Woche – am Wochenende schon die kommende."""
+    return d - timedelta(days=d.weekday()) + (timedelta(days=7) if d.weekday() >= 5 else timedelta(0))
+
+
+_URL_RE = re.compile(r"\b(?:https?|webcal)://\S+")
+
+
+def safe_error(e):
+    """Fehlertext ohne Adressen: requests schreibt die volle URL in seine Meldungen – beim
+    Kalender ist das die geheime iCal-Adresse. Die Meldung landet in /api/heute und im Journal."""
+    msg = _URL_RE.sub("[Adresse]", str(e))
+    msg = re.sub(r"(with url: )\S+", r"\1[…]", msg)      # "Max retries exceeded with url: /geheim/…"
+    return f"{type(e).__name__}: {msg}"[:300]
+
+
 def clean_text(t):
     t = (t or "").replace("\r\n", "\n").replace("\r", "\n").replace("\t", " ")
     t = re.sub(r"[  ]+", " ", t)
@@ -117,6 +131,7 @@ def clean_text(t):
 
 # ------------------ HINTERGRUND-QUELLEN ------------------
 RETRY_DELAYS = [3, 5, 10, 20, 40, 60]
+AUTH_RETRY = 1800      # falsches Passwort/gesperrt: erst nach 30 min wieder versuchen (Kontosperre!)
 
 class Source:
     """Eine Datenquelle mit eigenem Intervall, Cache und Fehlerstatus."""
@@ -126,6 +141,7 @@ class Source:
         self.data, self.error, self.fetched_at = None, None, None
         self.next_run = 0
         self.failures = 0
+        self.auth_failed = False
         self.lock = threading.Lock()
 
     def run(self):
@@ -134,16 +150,20 @@ class Source:
             with self.lock:
                 self.data, self.error, self.fetched_at = data, None, datetime.now()
             self.failures = 0
+            self.auth_failed = False
         except Exception as e:
-            msg = f"{type(e).__name__}: {e}"
+            msg = safe_error(e)
+            self.auth_failed = untis.is_auth_error(e)
             print(f"[heute] {self.name} fehlgeschlagen: {msg}", flush=True)
             with self.lock:
                 self.error = msg
             self.failures += 1
         # nach Fehler schnell erneut versuchen (beim Booten ist das WLAN erst nach
-        # einigen Sekunden da): 3, 5, 10, 20, 40, 60, 60 … s
+        # einigen Sekunden da): 3, 5, 10, 20, 40, 60, 60 … s – außer bei falschem Passwort
         if self.error is None:
             delay = self.interval
+        elif self.auth_failed:
+            delay = AUTH_RETRY
         else:
             delay = min(60, self.interval, RETRY_DELAYS[min(self.failures, len(RETRY_DELAYS)) - 1])
         self.next_run = time.time() + delay
@@ -190,6 +210,7 @@ class UntisFetcher:
         self.duty_label = (cfg.get("DUTY_LABEL") or "").strip().lower()
         self.warned = set()
         self.marks = {}
+        self.session = untis.KeptSession(cfg)
 
     def _optional(self, name, fn):
         """Hausaufgaben/Ordnungsdienst sind nicht an jeder Schule für Schüler freigegeben –
@@ -198,44 +219,45 @@ class UntisFetcher:
             return fn()
         except Exception as e:
             if name not in self.warned:
-                print(f"[heute] {name} nicht verfügbar ({e}) – wird ausgeblendet", flush=True)
+                print(f"[heute] {name} nicht verfügbar ({safe_error(e)}) – wird ausgeblendet", flush=True)
                 self.warned.add(name)
             return {}
 
     def __call__(self):
+        return self.session.run(self._fetch)
+
+    def _fetch(self, u):
         today = date.today()
-        # ab Montag dieser Woche: die Wochenansicht (server.py) nutzt dieselben Stunden
-        start = today - timedelta(days=today.weekday())
+        # ab Montag der angezeigten Woche: die Wochenansicht (server.py) nutzt dieselben Stunden
+        start = min(today, week_monday(today))
         end = today + timedelta(days=10)
-        with untis.connect(self.cfg) as u:
-            m = self.master.ensure(u)
-            UNTIS_COLORS.update(m.colors)
-            try:
-                rows = u.rpc("getTimetable", {"options": {
-                    "element": {"id": m.class_id, "type": 1},
-                    "startDate": start.strftime("%Y%m%d"),
-                    "endDate": end.strftime("%Y%m%d"),
-                    "showInfo": True, "showSubstText": True, "showLsText": True, "showStudentgroup": True,
-                }})
-            except Exception:
-                self.master.invalidate()   # z. B. neues Schuljahr -> Klassen-ID neu suchen
-                raise
-            hw = self._optional("Hausaufgaben", lambda: u.rest(
-                "/api/homeworks/lessons",
-                startDate=(today - timedelta(days=14)).strftime("%Y%m%d"),
-                endDate=(today + timedelta(days=HOMEWORK_DAYS_AHEAD)).strftime("%Y%m%d")))
-            services = self._optional("Ordnungsdienst", lambda: u.rest(
-                "/api/classreg/classservices",
-                startDate=(today - timedelta(days=7)).strftime("%Y%m%d"),
-                endDate=(today + timedelta(days=14)).strftime("%Y%m%d"),
-                classId=m.class_id)) if self.duty_label else {}
-            # Symbole "Hausaufgabe fällig"/"Notiz" – nicht überall freigegeben; bei Fehler alter Stand
-            try:
-                self.marks = fetch_marks(u, m.class_id, start, end)
-            except Exception as e:
-                if "Untis-Markierungen" not in self.warned:
-                    print(f"[heute] Untis-Markierungen nicht verfügbar ({e})", flush=True)
-                    self.warned.add("Untis-Markierungen")
+        m = self.master.ensure(u)
+        try:
+            rows = u.rpc("getTimetable", {"options": {
+                "element": {"id": m.class_id, "type": 1},
+                "startDate": start.strftime("%Y%m%d"),
+                "endDate": end.strftime("%Y%m%d"),
+                "showInfo": True, "showSubstText": True, "showLsText": True, "showStudentgroup": True,
+            }})
+        except Exception:
+            self.master.invalidate()   # z. B. neues Schuljahr -> Klassen-ID neu suchen
+            raise
+        hw = self._optional("Hausaufgaben", lambda: u.rest(
+            "/api/homeworks/lessons",
+            startDate=(today - timedelta(days=14)).strftime("%Y%m%d"),
+            endDate=(today + timedelta(days=HOMEWORK_DAYS_AHEAD)).strftime("%Y%m%d")))
+        services = self._optional("Ordnungsdienst", lambda: u.rest(
+            "/api/classreg/classservices",
+            startDate=(today - timedelta(days=7)).strftime("%Y%m%d"),
+            endDate=(today + timedelta(days=14)).strftime("%Y%m%d"),
+            classId=m.class_id)) if self.duty_label else {}
+        # Symbole "Hausaufgabe fällig"/"Notiz" – nicht überall freigegeben; bei Fehler alter Stand
+        try:
+            self.marks = fetch_marks(u, m.class_id, start, end)
+        except Exception as e:
+            if "Untis-Markierungen" not in self.warned:
+                print(f"[heute] Untis-Markierungen nicht verfügbar ({safe_error(e)})", flush=True)
+                self.warned.add("Untis-Markierungen")
 
         return {
             "lessons": [self._lesson(l) for l in rows],
@@ -287,7 +309,7 @@ class UntisFetcher:
             "subject": base_subject(subject_raw) if status != "event" else subject_raw,
             "subject_full": subject_raw,      # z. B. "BKu2" – unterscheidet parallele Kurse
             "subject_old": next((base_subject(x["t"]) for x in su if x["k"] == "old"), None),
-            "color": subject_color(subject_raw),
+            "color": subject_color(subject_raw, self.master.colors),
             "teachers": te, "rooms": ro, "status": status,
             "group": l.get("sg") or subject_raw,
             "note": clean_text(l.get("substText")),
@@ -314,7 +336,7 @@ class UntisFetcher:
             if remark and remark.lower() != text.lower():
                 text = f"{text}\n{remark}" if text else remark
             name = subj.get(h.get("lessonId"), "?")
-            out.append({"subject": base_subject(name), "color": subject_color(name),
+            out.append({"subject": base_subject(name), "color": subject_color(name, self.master.colors),
                         "due": h["dueDate"], "text": text,
                         "_key": (h["dueDate"], first_start.get((h["dueDate"], name), 9999), name, h.get("id", 0))})
         # Untis liefert die Reihenfolge nicht stabil -> nach Abgabetag, dann nach der
@@ -423,9 +445,21 @@ def hide_covered_by_events(lessons):
             e["date"] == l["date"] and e["start"] < l["end"] and e["end"] > l["start"] for e in events))]
 
 
-def build_day(lessons, now):
+def back_to_back(prev_end, next_start, periods=None):
+    """Folgen zwei Stunden direkt aufeinander (Doppelstunde)? Mit Zeitraster: keine Stunde
+    dazwischen – egal wie lang die Pause der Schule ist. Ohne Raster: höchstens 20 min Lücke."""
+    gap = minutes(next_start) - minutes(prev_end)
+    if gap < 0:
+        return False
+    if periods:
+        between = any(p["start"] >= prev_end and p["end"] <= next_start for p in periods)
+        return not between and gap <= 45
+    return gap <= 20
+
+
+def build_day(lessons, now, periods=None):
     """Wählt den anzuzeigenden Tag (heute bis Schulschluss, danach nächster Schultag)
-    und fasst Doppelstunden + parallele Kurse zusammen."""
+    und fasst Doppelstunden + parallele Kurse zusammen. periods = Zeitraster der Schule."""
     today = now.date()
     now_min = now.hour * 60 + now.minute
     by_day = {}
@@ -451,7 +485,7 @@ def build_day(lessons, now):
     merged = []
     for l in sorted(by_day[target], key=lambda x: (x["start"], x["group"])):
         prev = next((m for m in reversed(merged) if key(m) == key(l)), None)
-        if prev and 0 <= minutes(l["start"]) - minutes(prev["end"]) <= 20:
+        if prev and back_to_back(prev["end"], l["start"], periods):
             prev["end"] = max(prev["end"], l["end"])
             if l["info"] and l["info"] not in prev["info"]:
                 prev["info"] = (prev["info"] + "\n" + l["info"]).strip()
@@ -494,6 +528,7 @@ def source_status(src):
     return {
         "ok": error is None and data is not None,
         "error": error,
+        "auth": bool(getattr(src, "auth_failed", False)),   # Login abgelehnt (Passwort prüfen)
         "loaded": data is not None,
         "since": fetched_at.strftime("%H:%M") if fetched_at else None,
     }
@@ -501,10 +536,12 @@ def source_status(src):
 
 # ------------------ INTEGRATION IN FLASK ------------------
 _sources = {}
+_master = {}
 
 
 def init(app, cfg, master):
     _sources["untis"] = Source("Untis", UNTIS_INTERVAL, UntisFetcher(cfg, master))
+    _master["data"] = master
     # Kalender und Wetter sind optional: ohne Eintrag in config.env gibt es die Quelle nicht
     if cfg["CALENDAR_ICS_URL"].strip():
         _sources["calendar"] = Source("Kalender", CALENDAR_INTERVAL, CalendarFetcher(cfg["CALENDAR_ICS_URL"].strip()))
@@ -531,7 +568,7 @@ def init(app, cfg, master):
         cal = _sources["calendar"].snapshot()[0] if "calendar" in _sources else None
         weather = _sources["weather"].snapshot()[0] if "weather" in _sources else None
 
-        day = build_day(untis_data["lessons"], now) if untis_data else None
+        day = build_day(untis_data["lessons"], now, _master["data"].periods) if untis_data else None
         ref = date.fromisoformat(day["date"]) if day else today
         ref_int = int(ref.strftime("%Y%m%d"))
 

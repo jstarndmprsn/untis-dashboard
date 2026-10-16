@@ -26,7 +26,7 @@ The display itself is in German (that's where WebUntis is used most); setup and 
 - **Screen schedule** – always on during school hours, off when idle otherwise (or simply always on).
 - Pi extras (all optional): **two hardware buttons** (switch view / hold to shut down),
   **smooth fan curve + overheat protection** (Pi 5), **weekly auto-updates**
-  that are safe to interrupt, and a **custom boot animation**.
+  that are safe to interrupt (off by default), and a **custom boot animation**.
 
 ## What you need
 
@@ -150,11 +150,15 @@ journalctl -u raspy-web -f                # web server / Untis errors
 venv/bin/python app/configure.py --check  # test login, class and calendar
 ```
 
-- **"Login fehlgeschlagen"** – wrong username/password, or the account was locked; run `./install.sh --configure`.
+- **"Untis-Login abgelehnt"** – wrong username/password, or the account was locked; run `./install.sh --configure`.
+  After a rejected login raspy only retries every 30 minutes, so it can't get the account locked.
 - **No homework / class duty** – not every school allows student accounts to see them; the rest still works.
 - **Screen stays black / desktop shows** – raspy needs the X11 desktop session. The installer offers
   to switch from Wayland; otherwise use `sudo raspi-config` → Advanced Options → Wayland → X11.
-- **Pages from another device**: `http://<pi-name>.local:5000/heute`, `/` and `/thermal`.
+- **Pages from another device**: by default the web server only listens on the Pi itself (the kiosk
+  is all that needs it). Set `LAN_ACCESS=1` in `config.env` and restart (`sudo systemctl restart raspy-web`)
+  to open `http://<pi-name>.local:5000/heute`, `/` and `/thermal` from elsewhere – there is no login,
+  so only do this on a network you trust.
 
 ## Uninstall
 
@@ -168,8 +172,10 @@ Your `config.env` stays until you delete the folder.
 ## Project layout
 
 ```
-app/          Flask server: server.py (week view), dashboard.py (/heute), thermal.py (/thermal),
-              untis.py (WebUntis client), configure.py (setup), demo.py, templates/, static/
+app/          Flask server: server.py (app + week view page), week.py (week table), dashboard.py
+              (/heute + all Untis data), thermal.py (/thermal), untis.py (WebUntis client),
+              configure.py (setup), demo.py, templates/, static/
+tests/        pytest suite (python -m pytest), runs in CI together with shellcheck
 device/       runs on the Pi: buttons, overlays, fan/overheat guard, boot splash, kiosk, screen schedule
 system/       systemd units and config templates used by install.sh
 boot/         boot animation generator (make_frames.py) and logo
@@ -181,7 +187,8 @@ boot/         boot animation generator (make_frames.py) and logo
   Think about who can see it, and **ask your school before putting it up** – it's their WebUntis.
 - `config.env` contains your Untis password and calendar link. It's in `.gitignore`; keep it that way.
 - raspy uses the same (unofficial) WebUntis API as many open-source clients. It is not affiliated
-  with Untis GmbH. It only reads data and polls every 1.5–2 minutes.
+  with Untis GmbH. It only reads data, polls every 2 minutes and keeps one login session open
+  instead of logging in for every poll.
 
 ## License
 

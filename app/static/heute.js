@@ -72,7 +72,7 @@ function renderLessons() {
     $("day-label").textContent = "Stunden";
     el.innerHTML = `<div class="empty-state">${
       st.loaded ? "Keine Stunden in den nächsten Tagen" :
-      st.error ? "Untis gerade nicht erreichbar" : "Stundenplan wird geladen …"}</div>`;
+      st.auth ? AUTH_MSG : st.error ? "Untis gerade nicht erreichbar" : "Stundenplan wird geladen …"}</div>`;
     return;
   }
   $("day-label").textContent = day.label === "Heute" ? "Heute" :
@@ -132,7 +132,7 @@ function renderTasks() {
   if (!html) {
     html = `<div class="events-empty">${
       st.loaded ? "Keine Hausaufgaben oder Aufträge" :
-      st.error ? "Untis gerade nicht erreichbar" : "Wird geladen …"}</div>`;
+      st.auth ? AUTH_MSG : st.error ? "Untis gerade nicht erreichbar" : "Wird geladen …"}</div>`;
   }
   el.innerHTML = html;
   el.classList.toggle("overflow", el.scrollHeight > el.clientHeight + 4);
@@ -186,11 +186,15 @@ function renderHead() {
   $("duty").innerHTML = d ? `${svg("broom")}<div><div class="duty-label">Ordnungsdienst</div><div class="duty-names">${esc(d)}</div></div>` : "";
 }
 
+// Login abgelehnt: der Server versucht es nur alle 30 min erneut (sonst sperrt Untis das Konto)
+const AUTH_MSG = "Untis-Login abgelehnt – Passwort prüfen (./install.sh --configure)";
+
 function renderStatus() {
   const msgs = [];
   const names = { untis: "Untis", calendar: "Kalender", weather: "Wetter" };
   for (const [k, s] of Object.entries(data.status)) {
-    if (s.error && s.loaded) msgs.push(`${names[k]} nicht erreichbar · Stand ${s.since}`);
+    if (s.auth) msgs.push(AUTH_MSG + (s.loaded ? ` · Stand ${s.since}` : ""));
+    else if (s.error && s.loaded) msgs.push(`${names[k]} nicht erreichbar · Stand ${s.since}`);
     else if (s.error) msgs.push(`${names[k]} nicht erreichbar`);
   }
   if (Date.now() - lastFetchOk > 90000) msgs.unshift("Keine Verbindung zum Server");

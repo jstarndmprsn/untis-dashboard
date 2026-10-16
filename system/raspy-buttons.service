@@ -9,7 +9,9 @@ Environment=DISPLAY=:0
 Environment=GPIOZERO_PIN_FACTORY=lgpio
 # button.py wartet beim Start 15 s (Desktop/X muss erst laufen) – nicht entfernen
 ExecStart=/usr/bin/python3 @DIR@/device/button.py
+# button.py beendet sich bei einem Fehler in der Tastenschleife mit Code 1 -> Neustart
 Restart=on-failure
+RestartSec=3
 StandardOutput=journal
 StandardError=journal
 

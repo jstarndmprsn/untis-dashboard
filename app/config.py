@@ -28,6 +28,7 @@ DEFAULTS = {
     "BUTTON_TAB_GPIO": "17",
     "BUTTON_POWER_GPIO": "27",
     "PORT": "5000",
+    "LAN_ACCESS": "0",           # 1 = Webserver auch von anderen Geräten im Netz erreichbar
     "DEMO": "0",                 # 1 = erfundene Beispieldaten statt Untis (zum Ausprobieren)
 }
 
@@ -74,5 +75,21 @@ def load(path=CONFIG_FILE):
     return cfg
 
 
+def run_dir():
+    """Ordner für Zustandsdateien zwischen den Diensten (/run/raspy, angelegt per tmpfiles.d
+    von install.sh). Fehlt er (z. B. beim Ausprobieren am Laptop): Temp-Ordner."""
+    d = os.environ.get("RASPY_RUN_DIR", "/run/raspy")
+    if not os.access(d, os.W_OK):
+        import tempfile
+        d = os.path.join(tempfile.gettempdir(), "raspy")
+        os.makedirs(d, exist_ok=True)
+    return d
+
+
+def enabled(cfg, key):
+    """Ja/Nein-Einstellung (1/true/yes/ja = an)."""
+    return str(cfg.get(key, "0")).strip().lower() in ("1", "true", "yes", "ja")
+
+
 def demo(cfg):
-    return str(cfg.get("DEMO", "0")).lower() in ("1", "true", "yes", "ja")
+    return enabled(cfg, "DEMO")

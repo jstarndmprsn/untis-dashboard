@@ -20,8 +20,25 @@ MASTERDATA_MAX_AGE = 6 * 3600
 SCHOOL_SEARCH_URL = "https://mobile.webuntis.com/ms/schoolquery2"
 
 
+# JSON-RPC-Fehlercodes von WebUntis
+ERR_BAD_CREDENTIALS = -8504
+ERR_NOT_AUTHENTICATED = -8520
+ERR_USER_BLOCKED = -8998
+SESSION_MAX_AGE = 3600     # Anmeldung höchstens so lange wiederverwenden
+
+
 class UntisError(RuntimeError):
-    pass
+    def __init__(self, message, code=None):
+        super().__init__(message)
+        self.code = code
+
+
+def is_auth_error(e):
+    """Falsches Passwort / gesperrtes Konto – nicht im Minutentakt wiederholen (Kontosperre)."""
+    if isinstance(e, UntisError) and e.code in (ERR_BAD_CREDENTIALS, ERR_USER_BLOCKED):
+        return True
+    msg = str(e).lower()
+    return any(w in msg for w in ("bad credentials", "invalid user", "user is blocked", "gesperrt"))
 
 
 def clean_server(server):
@@ -66,12 +83,16 @@ class UntisClient:
             raise UntisError(f"Unerwartete Antwort von {self.base} (HTTP {r.status_code}) – "
                              f"Server/Schule prüfen") from None
         if "error" in j:
-            raise UntisError(j["error"].get("message", str(j["error"])))
+            raise UntisError(j["error"].get("message", str(j["error"])), j["error"].get("code"))
         return j.get("result")
 
     def rest(self, path, **params):
         if self._token is None:
-            self._token = self.s.get(f"{self.base}/api/token/new", timeout=15).text
+            t = self.s.get(f"{self.base}/api/token/new", timeout=15)
+            t.raise_for_status()
+            self._token = t.text.strip()
+            if not self._token:
+                raise UntisError("Kein Zugriffstoken von WebUntis erhalten")
         r = self.s.get(f"{self.base}{path}", params=params, timeout=20,
                        headers={"Authorization": f"Bearer {self._token}"})
         r.raise_for_status()
@@ -89,6 +110,42 @@ def connect(cfg):
     if not cfg["UNTIS_SERVER"] or not cfg["UNTIS_SCHOOL"]:
         raise UntisError("UNTIS_SERVER/UNTIS_SCHOOL fehlen in config.env")
     return UntisClient(cfg["UNTIS_SERVER"], cfg["UNTIS_SCHOOL"], cfg["UNTIS_USER"], cfg["UNTIS_PASSWORD"])
+
+
+class KeptSession:
+    """Eine Untis-Anmeldung über mehrere Abrufe hinweg (statt Login/Logout alle 2 Minuten).
+
+    run(fn) ruft fn(client) auf. Schlägt etwas mit einer *wiederverwendeten* Sitzung fehl
+    (z. B. auf dem Server abgelaufen), wird einmal frisch angemeldet und neu versucht."""
+
+    def __init__(self, cfg):
+        self.cfg = cfg
+        self.client = None
+        self.since = 0
+
+    def drop(self):
+        if self.client is not None:
+            try:
+                self.client.__exit__(None, None, None)
+            except Exception:
+                pass
+        self.client = None
+
+    def run(self, fn):
+        if self.client is not None and time.time() - self.since > SESSION_MAX_AGE:
+            self.drop()
+        for _ in range(2):
+            fresh = self.client is None
+            try:
+                if fresh:
+                    self.client = connect(self.cfg).__enter__()
+                    self.since = time.time()
+                return fn(self.client)
+            except Exception as e:
+                self.drop()
+                if fresh or is_auth_error(e):
+                    raise
+        raise UntisError("Untis-Abruf fehlgeschlagen")   # nicht erreichbar
 
 
 def find_class(classes, name):

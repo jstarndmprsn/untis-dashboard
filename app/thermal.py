@@ -6,7 +6,7 @@ Die Seite wird von button.py als eigenes Chromium-Fenster geöffnet
 (beide Tasten 2 s halten) und mit der Tab-Taste wieder geschlossen.
 
 Der Überhitzungsschutz selbst läuft unabhängig davon als raspy-thermal.service
-(device/thermal_guard.py) und schreibt seinen Zustand nach /tmp/thermal_guard.json.
+(device/thermal_guard.py) und schreibt seinen Zustand nach /run/raspy/thermal_guard.json.
 """
 import glob
 import json
@@ -19,9 +19,11 @@ from collections import deque
 import psutil
 from flask import jsonify, render_template
 
+import config
+
 SAMPLE_INTERVAL = 2          # Sekunden
 HISTORY_SECONDS = 15 * 60
-GUARD_STATE_FILE = "/tmp/thermal_guard.json"
+GUARD_STATE_FILE = os.path.join(config.run_dir(), "thermal_guard.json")
 
 # Anzeige-Schwellen (die Notabschaltung selbst kommt aus thermal_guard.py)
 TEMP_WARN = 75

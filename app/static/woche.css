@@ -1,0 +1,43 @@
+/* Wochenansicht (/) – 1920×1080, Design wie seit V.1.x */
+body { margin: 0; font-family: Arial, Helvetica, sans-serif; background: #111; color: #fff; }
+table { width: 100vw; height: 100vh; border-collapse: separate; border-spacing: 10px; table-layout: fixed; }
+th { background: #222; font-size: 1.5em; color: #fff; border: 1px solid #333; padding: 3px; text-align: center; border-radius: 3px; }
+th:first-child { width: 120px; font-size: 1.2em; }
+th.today { color: rgb(255, 96, 54); }
+th .date { display: block; font-size: 0.9em; color: #aaa; margin-top: 3px; }
+td { font-size: 1.1em; padding: 10px 10px 10px 18px; border-radius: 15px; background: #333; color: #fff; position: relative; border: 3px solid transparent; overflow: hidden; word-wrap: break-word; }
+td::before { content: ''; position: absolute; left: 0; top: 0; width: 8px; height: 100%; border-radius: 15px 0 0 15px; background: transparent; }
+td .subject { font-weight: bold; display: block; }
+td .info { font-size: 0.95em; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+td .note { color: #bbb; }
+.empty { background: #111; border: none; }
+.error { display: flex; align-items: center; justify-content: center; height: 100vh; font-size: 2.5em; font-weight: bold; color: #ff3333; }
+
+/* Vertretungs-Styles */
+td.substitution { border-color: #4caf50 !important; }
+td.cancelled { border-color: #ff3333 !important; }
+td.event { border-color: #00bcd4 !important; }
+.old-teacher { text-decoration: line-through; color: #888; }
+.new-teacher, .new-room, .new-subject { color: #4caf50; border-bottom: 2px solid #4caf50; padding-bottom: 1px; }
+
+/* Untis-Markierungen: Hausaufgabe fällig / Notiz */
+.marks { white-space: nowrap; margin-left: 0.3em; }
+.mark { width: 0.9em; height: 0.9em; vertical-align: -0.1em; margin-left: 0.2em; fill: none; stroke-width: 2;
+        stroke-linecap: round; stroke-linejoin: round; }
+.mark.hw { stroke: #ffcc4d; }
+.mark.notes { stroke: #bbb; }
+
+/* Multi-Course Styles */
+.multi-course { display: flex; gap: 3px; height: 100%; }
+.course { flex: 1; min-width: 0; padding: 2px; border-left: 1px solid #555; }
+.course:first-child { border-left: none; }
+td.multi::before { background: var(--stripe-gradient, var(--stripe-color)) !important; }
+
+/* Fullscreen Version Display */
+#version-screen { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #111; color: #fff; align-items: center; justify-content: center; font-size: 5em; font-weight: bold; z-index: 9999; }
+
+td.normal::before { background: var(--stripe-color); }
+table.compact td { padding-top: 4px; padding-bottom: 4px; }
+table.compact td br { display: none; }
+.no-school { background: #222; color: #666; font-size: 1.5em; text-align: center; padding: 50px; border-radius: 15px; }
+.stale { position: fixed; bottom: 6px; right: 12px; background: #5a1a1a; color: #ffb3b3; padding: 4px 10px; border-radius: 6px; font-size: 0.9em; z-index: 100; }
