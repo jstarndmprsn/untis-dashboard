@@ -4,6 +4,10 @@
 
 ### Added
 
+- `STATUS_FILE` in `config.env`: another program on the Pi (a Wi-Fi watchdog, a maintenance
+  script …) can write a short notice into a file – JSON `{"message": …, "updated": <unix time>}` or
+  plain text – and `/heute` shows it in the status line. Notices older than 3 minutes are ignored,
+  so nothing sticks around if that program stops.
 - `./install.sh --keep-boot` leaves the boot setup (boot animation, `cmdline.txt`, initramfs)
   untouched, and `--no-reboot` skips the reboot at the end. Meant for updates over SSH when
   nobody can get to the Pi if it doesn't boot.

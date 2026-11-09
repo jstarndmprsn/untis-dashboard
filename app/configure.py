@@ -324,9 +324,11 @@ SECTIONS = [
      ["SCREEN_SCHEDULE", "SCREEN_ON_FROM", "SCREEN_ON_UNTIL", "SCREEN_IDLE_OFF"],
      "SCREEN_SCHEDULE=1: Mon–Fri between FROM and UNTIL (HHMM) the screen stays on; otherwise off after\n"
      "IDLE_OFF seconds without a button press. SCREEN_SCHEDULE=0: the screen is always on."),
-    ("Hardware", ["BUTTON_TAB_GPIO", "BUTTON_POWER_GPIO", "PORT", "LAN_ACCESS"],
+    ("Hardware", ["BUTTON_TAB_GPIO", "BUTTON_POWER_GPIO", "PORT", "LAN_ACCESS", "STATUS_FILE"],
      "BCM GPIO numbers; PORT of the web server.\n"
-     "LAN_ACCESS=1: pages also reachable from other devices (no login – only on a network you trust)."),
+     "LAN_ACCESS=1: pages also reachable from other devices (no login – only on a network you trust).\n"
+     "STATUS_FILE: optional file another program writes a short notice into (JSON {\"message\": …,\n"
+     "\"updated\": unix time} or plain text); shown in the status line of /heute while it is fresh."),
 ]
 
 

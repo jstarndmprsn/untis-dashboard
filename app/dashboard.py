@@ -13,6 +13,8 @@ fällt eine aus, bleibt ihr letzter Stand stehen):
 Die Seite selbst (templates/heute.html + static/heute.*) holt alle 30 s
 /api/heute und rendert im Browser.
 """
+import json
+import os
 import re
 import threading
 import time
@@ -534,14 +536,56 @@ def source_status(src):
     }
 
 
+# ------------------ HINWEIS VON AUSSEN (STATUS_FILE) ------------------
+NOTICE_MAX_AGE = 180     # älter = Schreiber läuft nicht mehr -> Hinweis ausblenden
+NOTICE_MAX_LEN = 120
+
+
+def read_notice(path, now=None):
+    """Optionaler Hinweis eines anderen Programms (z. B. eines WLAN-Wächters) für die Statuszeile.
+
+    STATUS_FILE in config.env zeigt auf eine Datei, die das Programm schreibt:
+      - JSON: {"message": "WLAN getrennt · verbinde neu …", "updated": <Unix-Zeit>}
+        ("updated" optional; leere/fehlende "message" = kein Hinweis)
+      - oder einfacher Text (erste Zeile)
+    Ist die Datei älter als NOTICE_MAX_AGE Sekunden, wird sie ignoriert – so bleibt kein alter
+    Hinweis stehen, wenn das Programm abstürzt. Fehlt die Datei: kein Hinweis.
+    """
+    if not path:
+        return None
+    now = time.time() if now is None else now
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = f.read(4096)
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return None
+    updated, msg = mtime, None
+    try:
+        j = json.loads(raw)
+        if isinstance(j, dict):
+            msg = j.get("message")
+            if isinstance(j.get("updated"), (int, float)):
+                updated = j["updated"]
+        elif isinstance(j, str):
+            msg = j
+    except ValueError:
+        msg = raw.strip().splitlines()[0] if raw.strip() else None
+    if not isinstance(msg, str) or not msg.strip() or now - updated > NOTICE_MAX_AGE:
+        return None
+    return clean_text(msg).replace("\n", " ")[:NOTICE_MAX_LEN]
+
+
 # ------------------ INTEGRATION IN FLASK ------------------
 _sources = {}
 _master = {}
+_notice = {"path": ""}
 
 
 def init(app, cfg, master):
     _sources["untis"] = Source("Untis", UNTIS_INTERVAL, UntisFetcher(cfg, master))
     _master["data"] = master
+    _notice["path"] = (cfg.get("STATUS_FILE") or "").strip()
     # Kalender und Wetter sind optional: ohne Eintrag in config.env gibt es die Quelle nicht
     if cfg["CALENDAR_ICS_URL"].strip():
         _sources["calendar"] = Source("Kalender", CALENDAR_INTERVAL, CalendarFetcher(cfg["CALENDAR_ICS_URL"].strip()))
@@ -606,6 +650,7 @@ def init(app, cfg, master):
             "now": now.isoformat(timespec="seconds"), "preview": bool(tag),
             "features": {"calendar": "calendar" in _sources, "weather": "weather" in _sources},
             "status": {k: source_status(v) for k, v in _sources.items()},
+            "notice": read_notice(_notice["path"]),
         })
 
 

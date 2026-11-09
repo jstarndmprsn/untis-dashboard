@@ -53,3 +53,12 @@ def test_thermal_page(client):
 def test_week_css_has_subject_stripes(client):
     css = client.get("/static/woche.css").get_data(as_text=True)
     assert "td.normal::before" in css and ".no-school" in css and "table.compact" in css
+
+
+def test_notice_from_status_file(client, tmp_path, monkeypatch):
+    f = tmp_path / "notice.txt"
+    f.write_text("Update läuft")
+    monkeypatch.setitem(dashboard._notice, "path", str(f))
+    assert client.get("/api/heute").get_json()["notice"] == "Update läuft"
+    f.unlink()
+    assert client.get("/api/heute").get_json()["notice"] is None

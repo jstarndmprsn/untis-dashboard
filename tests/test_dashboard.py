@@ -99,3 +99,23 @@ def test_lesson_without_subject_but_with_teacher_is_event():
     gone = f._lesson({"id": 2, "date": 20261015, "startTime": 800, "endTime": 845,
                       "te": [{"id": 0, "orgid": 1}], "su": [{"id": 1}], "ro": [{"id": 1}]})
     assert gone["status"] == "cancelled"
+
+
+def test_read_notice_json_text_stale_and_missing(tmp_path):
+    f = tmp_path / "state.json"
+    assert dashboard.read_notice("") is None
+    assert dashboard.read_notice(str(tmp_path / "fehlt.json")) is None
+
+    f.write_text('{"message": "WLAN getrennt · verbinde neu …", "updated": 1000}')
+    assert dashboard.read_notice(str(f), now=1060) == "WLAN getrennt · verbinde neu …"
+    assert dashboard.read_notice(str(f), now=1000 + dashboard.NOTICE_MAX_AGE + 1) is None   # Schreiber tot
+    f.write_text('{"message": "", "updated": 1000}')
+    assert dashboard.read_notice(str(f), now=1001) is None                                  # alles gut
+
+    f.write_text("Wartung läuft\nzweite Zeile")
+    assert dashboard.read_notice(str(f)) == "Wartung läuft"                                 # Text, mtime zählt
+    f.write_text('{"message": "' + "x" * 500 + '"}')
+    assert len(dashboard.read_notice(str(f))) == dashboard.NOTICE_MAX_LEN
+    f.write_text('[1, 2]')
+    assert dashboard.read_notice(str(f)) is None
+

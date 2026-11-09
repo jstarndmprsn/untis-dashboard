@@ -197,6 +197,7 @@ function renderStatus() {
     else if (s.error && s.loaded) msgs.push(`${names[k]} nicht erreichbar · Stand ${s.since}`);
     else if (s.error) msgs.push(`${names[k]} nicht erreichbar`);
   }
+  if (data.notice) msgs.unshift(data.notice);   // Hinweis von außen (STATUS_FILE)
   if (Date.now() - lastFetchOk > 90000) msgs.unshift("Keine Verbindung zum Server");
   $("status").innerHTML = msgs.map((m) => `<span>${esc(m)}</span>`).join("");
 }

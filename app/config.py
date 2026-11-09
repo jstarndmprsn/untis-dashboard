@@ -29,6 +29,7 @@ DEFAULTS = {
     "BUTTON_POWER_GPIO": "27",
     "PORT": "5000",
     "LAN_ACCESS": "0",           # 1 = Webserver auch von anderen Geräten im Netz erreichbar
+    "STATUS_FILE": "",           # optional: Hinweis eines anderen Programms in der Statuszeile von /heute
     "DEMO": "0",                 # 1 = erfundene Beispieldaten statt Untis (zum Ausprobieren)
 }
 
