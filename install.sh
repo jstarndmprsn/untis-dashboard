@@ -5,6 +5,10 @@
 #   ./install.sh --configure   change settings in a menu (school, login, class, calendar, weather, screen …)
 #   ./install.sh --uninstall   remove the services and system changes again
 #
+# Options for an install/update run:
+#   --keep-boot    leave the boot setup (boot animation, cmdline.txt, initramfs) exactly as it is
+#   --no-reboot    don't offer a reboot at the end (e.g. when working remotely over SSH)
+#
 # Needs Raspberry Pi OS with desktop (Debian 12/13). Asks for sudo when it needs it.
 set -euo pipefail
 
@@ -15,6 +19,13 @@ SYSEDIT="$DIR/system/sysedit.py"
 LIGHTDM=${LIGHTDM:-/etc/lightdm/lightdm.conf}
 BOOT=${BOOT:-/boot/firmware}; [ -d "$BOOT" ] || BOOT=/boot
 ORIG_SETUP=""
+KEEP_BOOT=n NO_REBOOT=n
+for arg in "$@"; do
+  case "$arg" in
+    --keep-boot) KEEP_BOOT=y ;;
+    --no-reboot) NO_REBOOT=y ;;
+  esac
+done
 
 # ───────────────────────── helpers ─────────────────────────
 say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
@@ -321,7 +332,11 @@ else
 fi
 # Updates: Standard aus (unbeaufsichtigtes full-upgrade auf einem Kiosk) – frühere Wahl bleibt erhalten
 ask_yn "Automatic system updates (full-upgrade on Tuesdays 09:45, safe to interrupt)?" "$(def "$F_UPDATES" n)" && F_UPDATES=y || F_UPDATES=n
-ask_yn "Custom boot animation (changes boot settings – advanced)?" "$(def "$F_BOOT" n)" && F_BOOT=y || F_BOOT=n
+if [ "$KEEP_BOOT" = y ]; then
+  F_BOOT=$(def "$F_BOOT" n)   # Auswahl merken, aber nichts am Boot ändern
+else
+  ask_yn "Custom boot animation (changes boot settings – advanced)?" "$(def "$F_BOOT" n)" && F_BOOT=y || F_BOOT=n
+fi
 [ "$IS_PI" = y ] || [ "$F_BUTTONS$F_BOOT" = nn ] || warn "This does not look like a Raspberry Pi – buttons/boot animation may not work."
 
 say "Packages"
@@ -332,7 +347,7 @@ if ! command -v chromium >/dev/null && ! command -v chromium-browser >/dev/null;
 fi
 [ "$F_BUTTONS" = y ] && PKGS+=(python3-gpiozero python3-lgpio)
 [ "$F_BUTTONS$F_FAN$F_BOOT" != nnn ] && PKGS+=(python3-tk python3-pil fonts-noto-core)
-[ "$F_BOOT" = y ] && PKGS+=(plymouth)
+[ "$F_BOOT" = y ] && [ "$KEEP_BOOT" = n ] && PKGS+=(plymouth)
 sudo apt-get update -q >/dev/null
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q "${PKGS[@]}" || die "apt-get install failed (see above)"
 ok "Installed: ${PKGS[*]}"
@@ -358,7 +373,9 @@ if [ "$F_BUTTONS" = y ]; then install_buttons; else remove_buttons; fi
 if [ "$F_FAN" = y ];     then install_fan;     else remove_fan; fi
 install_screen
 if [ "$F_UPDATES" = y ]; then install_updates; else remove_updates; fi
-if [ "$F_BOOT" = y ];    then install_boot;    else remove_boot; fi
+if [ "$KEEP_BOOT" = y ]; then say "Boot animation"; ok "Left unchanged (--keep-boot)"
+elif [ "$F_BOOT" = y ]; then install_boot
+else remove_boot; fi
 [ "$F_BUTTONS$F_FAN$F_UPDATES" = nnn ] && sudo rm -f /etc/sudoers.d/raspy
 
 PORT=$(setting PORT); PORT=${PORT:-5000}
@@ -370,4 +387,8 @@ else
 fi
 echo "  Change settings later:     ./install.sh --configure"
 echo "  Logs:                      journalctl -u raspy-web -f"
-if ask_yn "Reboot now to start the kiosk?" y; then sudo reboot; fi
+if [ "$NO_REBOOT" = y ]; then
+  echo "  Not rebooting (--no-reboot). Start the kiosk now with: sudo systemctl restart lightdm"
+elif ask_yn "Reboot now to start the kiosk?" y; then
+  sudo reboot
+fi

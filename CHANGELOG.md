@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `./install.sh --keep-boot` leaves the boot setup (boot animation, `cmdline.txt`, initramfs)
+  untouched, and `--no-reboot` skips the reboot at the end. Meant for updates over SSH when
+  nobody can get to the Pi if it doesn't boot.
+
 ## 2026-10-16 – Safer defaults, tests and CI
 
 ### Security

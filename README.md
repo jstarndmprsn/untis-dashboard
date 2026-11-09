@@ -80,6 +80,11 @@ extras (buttons, fan, updates, boot animation), run `./install.sh` again.
 
 To update: `git pull && ./install.sh`. What changed is in the [changelog](CHANGELOG.md).
 
+Working remotely over SSH? `./install.sh --keep-boot --no-reboot` leaves the boot setup
+(boot animation, `cmdline.txt`, initramfs) untouched and doesn't reboot – start the kiosk with
+`sudo systemctl restart lightdm` instead. That way a typo can't stop the Pi from booting while
+nobody can reach it.
+
 ## Try it without a Pi
 
 Demo mode uses made-up data (class "9a" with a substitution, a cancellation, a trip …):
