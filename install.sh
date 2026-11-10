@@ -245,19 +245,20 @@ install_guard() {
   # Wächter-Datei atomar installieren (alte bleibt als Rückfall), Starter prüft die Prüfsumme
   sudo python3 "$DIR/guard/raspy_guard.py" install-self "$DIR/guard/raspy_guard.py" >/dev/null
   put "$DIR/system/raspy-guard" /usr/local/sbin/raspy-guard 755
+  sudo ln -sf /usr/local/sbin/raspy-guard /usr/local/bin/raspy-guard   # "raspy-guard status" auch ohne sudo
   printf 'BASE=%s\nOWNER=%s\n' "$BASE" "$ME" | sudo tee /etc/raspy-guard.conf >/dev/null
   for u in raspy-guard.service raspy-guard.timer raspy-guard-boot.service; do
     put "$DIR/system/$u" "/etc/systemd/system/$u" 644
   done
   unit_on raspy-guard.timer raspy-guard-boot.service
   sudo systemctl start raspy-guard.timer
-  local w; w=$(setting GUARD_WINDOWS)
+  local w; w=$(grep -E "^GUARD_WINDOWS=" "$DIR/config.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d "\"'" || true)
   ok "Installs released versions (git tags v…) in: ${w:-no time window yet – set one with ./install.sh --configure}"
   ok "Status: raspy-guard status · log: /var/log/raspy-guard.log"
 }
 remove_guard() {
   unit_off raspy-guard.timer raspy-guard.service raspy-guard-boot.service
-  sudo rm -rf /usr/local/sbin/raspy-guard /usr/local/lib/raspy-guard /etc/raspy-guard.conf
+  sudo rm -rf /usr/local/sbin/raspy-guard /usr/local/bin/raspy-guard /usr/local/lib/raspy-guard /etc/raspy-guard.conf
 }
 
 install_boot() {
