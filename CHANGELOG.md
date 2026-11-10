@@ -19,7 +19,15 @@
   damaged copy is replaced by the previous one. It updates itself only after a new version has proven itself.
 - Optional: system updates (apt) in the same windows instead of Tuesday 09:45 (`GUARD_APT=1`).
 - Log with the list of changes for every update: `/var/log/raspy-guard.log`; overview: `raspy-guard status`.
-- Boot animation: with the watchdog, two red eyes ("SOFTWARE WATCHDOG" … "ACTIVE") come before the logo.
+- Boot animation: with the watchdog, two red eyes ("SOFTWARE WATCHDOG" … "ACTIVE") come before the logo,
+  and before that the running version (e.g. `v1.2.0`) is shown for 3 seconds. After an update the
+  watchdog swaps only that version image and rebuilds the initramfs of the running kernel – backed up
+  first, checked afterwards, and restored automatically if it doesn't look right.
+
+### Fixed
+
+- The boot animation is built into the initramfs of the *running* kernel (`update-initramfs -u -k $(uname -r)`).
+  Plain `-u` could pick the other kernel variant on a Pi 5, so the animation didn't show.
 
 ### Fixed
 

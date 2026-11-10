@@ -245,3 +245,43 @@ def test_install_self_keeps_previous_and_starter_falls_back(tmp_path, monkeypatc
     (lib / "raspy_guard.prev.py").write_text("auch kaputt")
     r = subprocess.run(["sh", starter, "selftest"], env=env, capture_output=True, text=True)
     assert r.returncode == 1
+
+
+# ───────────────────────── Versionsanzeige beim Start ─────────────────────────
+@pytest.mark.parametrize("broken", [False, True])
+def test_boot_version_rebuilds_or_restores_initramfs(setup, monkeypatch, broken):
+    g, tmp = setup["g"], setup["tmp"]
+    theme, fake_bin = tmp / "theme", tmp / "bin"
+    theme.mkdir(); fake_bin.mkdir()
+    (theme / "frames.json").write_text('{"version_s": 3.0}')
+    (theme / "version.png").write_bytes(b"alt")
+    img = tmp / "initrd.img-test"
+    img.write_bytes(b"x" * 1000)
+    # update-initramfs-Attrappe: baut "neu" bzw. zerstört das Abbild (Stromausfall o. Ä.)
+    (fake_bin / "update-initramfs").write_text("#!/bin/sh\n" + (f"printf kaputt > {img}\nexit 1\n" if broken else
+                                                               f"printf %01000d 0 > {img}\n"))
+    (fake_bin / "update-initramfs").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake_bin}:{os.environ['PATH']}")
+    monkeypatch.setattr(rg.shutil, "which", lambda c: None if c == "lsinitramfs" else shutil.which(c))
+    monkeypatch.setattr(rg, "THEME_DIR", str(theme))
+    monkeypatch.setattr(rg, "BACKUP_DIR", str(tmp / "backup"))
+    monkeypatch.setattr(rg.Guard, "initramfs_images", lambda self: ("test", [str(img)]))
+    monkeypatch.setattr(rg.Guard, "run", lambda self, cmd, **kw: open(cmd[cmd.index("--version-image") + 1], "wb")
+                        .write(b"neu-" + cmd[-1].encode()) and subprocess.CompletedProcess(cmd, 0, "", ""))
+    g.boot_version("v1.0.0")
+    log = open(rg.LOG_FILE).read()
+    if broken:
+        assert img.read_bytes() == b"x" * 1000                      # altes initramfs zurück
+        assert (theme / "version.png").read_bytes() == b"alt"
+        assert "zurückgespielt" in log
+    else:
+        assert (theme / "version.png").read_bytes() == b"neu-v1.0.0"
+        assert "neu gebaut und geprüft" in log
+
+
+def test_boot_version_skips_without_version_screen(setup, monkeypatch):
+    monkeypatch.setattr(rg, "THEME_DIR", str(setup["tmp"] / "kein-theme"))
+    called = []
+    monkeypatch.setattr(rg.Guard, "rebuild_initramfs", lambda self, *a: called.append(a))
+    setup["g"].boot_version("v1.0.0")
+    assert called == []

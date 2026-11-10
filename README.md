@@ -199,6 +199,9 @@ files at boot. Turn it on with `./install.sh` (*Software watchdog?* → yes), th
   owned by root; a starter checks its checksum and falls back to the previous copy. It updates itself
   only after a new version has proven itself.
 - Optional: system updates (apt) in the same windows instead of Tuesday 09:45.
+- With the boot animation, the running version is shown for 3 s at every start (white on black),
+  followed by the watchdog's eyes. After an update only that small image is replaced and the
+  initramfs rebuilt – backed up before, verified after, restored if anything is off.
 
 ```bash
 raspy-guard status            # active version, waiting update, next window, last results

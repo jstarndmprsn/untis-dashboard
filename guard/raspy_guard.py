@@ -53,6 +53,9 @@ LOG_FILE = os.environ.get("RASPY_GUARD_LOG", "/var/log/raspy-guard.log")
 LIB_DIR = os.environ.get("RASPY_GUARD_LIB", "/usr/local/lib/raspy-guard")
 LOCK_FILE = os.environ.get("RASPY_GUARD_LOCK", "/run/raspy-guard.lock")
 UPDATE_RUNNING = "/run/raspy-update/state"         # raspy-update (apt) läuft gerade
+THEME_DIR = os.environ.get("RASPY_GUARD_THEME", "/usr/share/plymouth/themes/raspy")
+BACKUP_DIR = os.environ.get("RASPY_GUARD_BACKUP", "/var/backups/raspy-guard")
+FIRMWARE = {"-2712": "initramfs_2712", "-v8": "initramfs8", "-v7l": "initramfs7l", "-v7": "initramfs7", "-v6": "initramfs"}
 
 FETCH_EVERY = 3600          # neue Tags höchstens stündlich holen
 MIN_LEFT = 4 * 60           # so viel muss vom Zeitfenster noch übrig sein (Umschalten + Prüfen)
@@ -556,6 +559,7 @@ class Guard:
             self.state.setdefault("history", []).append({"at": now_iso(), "from": cur, "to": name, "result": "ok"})
             self.save_state()
             log(f"  ✓ {name} läuft")
+            self.boot_version(name)
             self.self_update(name)
             self.prune()
             return True
@@ -604,6 +608,78 @@ class Guard:
             if v not in used:
                 shutil.rmtree(os.path.join(self.venvs, v), ignore_errors=True)
         self.save_state()
+
+    # ───────────────────────── Versionsanzeige beim Start ─────────────────────────
+    def boot_version(self, name):
+        """Neue Programmversion in der Boot-Animation anzeigen: version.png austauschen und das
+        initramfs des laufenden Kernels neu bauen (wie bei jedem Kernel-Update). Vorher sichern,
+        danach prüfen – stimmt etwas nicht, kommt das alte initramfs zurück."""
+        try:
+            meta = json.load(open(os.path.join(THEME_DIR, "frames.json")))
+        except (OSError, ValueError):
+            return                                   # keine Boot-Animation installiert
+        if not meta.get("version_s"):
+            return                                   # Theme ohne Versionsanzeige
+        root = os.path.join(self.releases, name)
+        tmp = tempfile.mkdtemp(prefix="raspy-version-")
+        self.fix_owner(tmp)
+        new = os.path.join(tmp, "version.png")
+        try:
+            self.run([os.path.join(root, "venv", "bin", "python"), os.path.join(root, "boot", "make_frames.py"),
+                      "--version-image", new, name], cwd=root, timeout=120)
+            target = os.path.join(THEME_DIR, "version.png")
+            data = open(new, "rb").read()
+            if os.path.exists(target) and open(target, "rb").read() == data:
+                return
+            self.rebuild_initramfs(target, data, name)
+        except Exception as e:  # noqa: BLE001 – die Versionsanzeige darf ein Update nie scheitern lassen
+            log(f"  Versionsanzeige beim Start nicht aktualisiert: {e}")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def initramfs_images(self):
+        kernel = os.uname().release
+        images = [f"/boot/initrd.img-{kernel}"]
+        for suffix, fw in FIRMWARE.items():
+            if kernel.endswith(suffix):
+                for d in ("/boot/firmware", "/boot"):
+                    if os.path.exists(os.path.join(d, fw)):
+                        images.append(os.path.join(d, fw))
+                        break
+                break
+        return kernel, [i for i in images if os.path.exists(i)]
+
+    def rebuild_initramfs(self, target, data, name):
+        kernel, images = self.initramfs_images()
+        if not images:
+            raise GuardError(f"kein initramfs für Kernel {kernel} gefunden")
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+        backups = {}
+        for img in images:
+            bak = os.path.join(BACKUP_DIR, os.path.basename(img) + ".bak")
+            atomic_write(bak, open(img, "rb").read(), 0o600)
+            backups[img] = bak
+        old_png = open(target, "rb").read() if os.path.exists(target) else None
+        atomic_write(target, data)
+        log(f"  Versionsanzeige beim Start → {name}: initramfs für {kernel} wird neu gebaut …")
+        r = subprocess.run(["update-initramfs", "-u", "-k", kernel], capture_output=True, text=True, timeout=900)
+        problems = [] if r.returncode == 0 else [f"update-initramfs → {r.returncode}: {r.stderr.strip()[-200:]}"]
+        for img, bak in backups.items():
+            if os.path.getsize(img) < 0.8 * os.path.getsize(bak):
+                problems.append(f"{img} viel kleiner als vorher")
+            elif shutil.which("lsinitramfs"):
+                listing = subprocess.run(["lsinitramfs", img], capture_output=True, text=True, timeout=300).stdout
+                if "plymouth/themes/raspy/version.png" not in listing:
+                    problems.append(f"{img} enthält die Boot-Animation nicht")
+        if not problems:
+            log("  ✓ initramfs neu gebaut und geprüft")
+            return
+        log(f"  ✗ initramfs nicht in Ordnung ({'; '.join(problems)}) – alte Fassung wird zurückgespielt")
+        for img, bak in backups.items():
+            atomic_write(img, open(bak, "rb").read(), os.stat(bak).st_mode & 0o777 or 0o644)
+        if old_png is not None:
+            atomic_write(target, old_png)
+        raise GuardError("initramfs zurückgespielt")
 
     # ───────────────────────── Selbst-Update ─────────────────────────
     def self_update(self, name):

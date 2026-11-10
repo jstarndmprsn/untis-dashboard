@@ -6,7 +6,12 @@ Mit --watchdog (Software-Wächter installiert) läuft vorher die Wächter-Animat
 zwei rote Augen, darüber „SOFTWARE WATCHDOG“; sie schauen nach links, rechts, in die Mitte,
 kneifen sich zusammen, darunter erscheint „ACTIVE“. Danach baut sich das Logo auf.
 
-  python3 make_frames.py raspy [--watchdog]
+Mit --version v1.2.3 zeigt der Start davor 3 s lang schwarz die Programmversion (weiß, mittig).
+Die Versionsanzeige ist ein eigenes Bild (version.png) – bei einer neuen Version wird nur dieses
+Bild ausgetauscht (--version-image), die Animation bleibt gleich.
+
+  python3 make_frames.py raspy [--watchdog] [--version v1.2.3]
+  python3 make_frames.py --version-image raspy/version.png v1.2.4
 
 Ausgabe (Ordner raspy/ = Plymouth-Theme):
   f0.png … fN.png   Intro (Aufbau) + Loop (Welle)   -> Plymouth + X-Splash
@@ -25,9 +30,21 @@ import sys
 
 from PIL import Image, ImageChops, ImageDraw, ImageFont
 
-ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
+def _opt(name):
+    """Wert der Option --name WERT aus sys.argv (oder None)."""
+    if name in sys.argv:
+        i = sys.argv.index(name)
+        return sys.argv[i + 1] if i + 1 < len(sys.argv) else ""
+    return None
+
+
+VERSION = _opt("--version")
+VERSION_IMAGE = _opt("--version-image")
+_values = {VERSION, VERSION_IMAGE}
+ARGS = [a for a in sys.argv[1:] if not a.startswith("--") and a not in _values]
 OUT = ARGS[0] if ARGS else "raspy"
 WATCHDOG = "--watchdog" in sys.argv
+VERSION_S = 3.0          # so lange steht die Version auf dem Bildschirm (vor den Augen)
 
 FPS = 50
 START_DELAY = 2.0       # Sekunden Schwarz beim Booten, bis der Monitor aufgewacht ist
@@ -279,6 +296,29 @@ def draw_watchdog(st):
     return img
 
 
+def make_version_image(text, path):
+    """Programmversion weiß auf transparent (der Bildschirm dahinter ist schwarz)."""
+    f = font_regular(56 * SS)
+    tmp = Image.new("L", (10, 10))
+    w = int(ImageDraw.Draw(tmp).textlength(text, font=f)) + 8 * SS
+    asc, desc = f.getmetrics()
+    alpha = Image.new("L", (w, asc + desc + 8 * SS), 0)
+    ImageDraw.Draw(alpha).text((4 * SS, 4 * SS), text, font=f, fill=255)
+    alpha = alpha.resize((max(1, w // SS), max(1, alpha.height // SS)), Image.LANCZOS)
+    img = Image.new("RGBA", alpha.size, (255, 255, 255, 0))
+    img.putalpha(alpha)
+    tmp_path = path + ".tmp.png"
+    img.save(tmp_path, optimize=True)
+    os.replace(tmp_path, path)
+
+
+def font_regular(size):
+    for f in [x.replace("-Bold", "-Regular").replace(" Bold", "") for x in FONTS]:
+        if os.path.exists(f):
+            return ImageFont.truetype(f, size)
+    return font(size)
+
+
 def save_watchdog(img, path):
     """Wie save_cropped, aber der Versatz gilt relativ zur (kleineren) Logo-Leinwand."""
     x, y = save_cropped(img, path)
@@ -297,7 +337,13 @@ def save_cropped(img, path):
 
 
 def main():
+    if VERSION_IMAGE is not None:            # nur das Versions-Bild neu (neue Programmversion)
+        make_version_image(ARGS[0] if ARGS else "", VERSION_IMAGE)
+        return
     os.makedirs(OUT, exist_ok=True)
+    version_s = VERSION_S if VERSION else 0.0
+    if VERSION:
+        make_version_image(VERSION, f"{OUT}/version.png")
     intro_n, loop_n, outro_n = round(INTRO_S * FPS), round(LOOP_S * FPS), round(OUTRO_S * FPS)
     wd_n = round(WD_S * WD_SLOW * FPS) if WATCHDOG else 0
     offsets, outro_offsets = [], []
@@ -313,7 +359,7 @@ def main():
 
     meta = {"fps": FPS, "intro_n": intro_n, "loop_n": loop_n, "outro_n": outro_n, "watchdog_n": wd_n,
             "canvas": [CW, CH], "offsets": offsets, "outro_offsets": outro_offsets,
-            "start_delay": START_DELAY,
+            "start_delay": START_DELAY + version_s, "version_s": version_s,
             "loop_rest_from": math.ceil((0.35 + 4 * 0.16 + 0.32) * FPS)}
     json.dump(meta, open(f"{OUT}/frames.json", "w"))
 
@@ -343,6 +389,11 @@ if (Plymouth.GetMode() == "boot")
     START_DELAY = {START_DELAY};
 else
     START_DELAY = 0;
+// Programmversion (version.png) nach dem Schwarz-Vorlauf, vor der Animation – nur beim Booten
+if (Plymouth.GetMode() == "boot")
+    VERSION_S = {version_s};
+else
+    VERSION_S = 0;
 INTRO_N = {intro_n};
 // Wächter-Animation (rote Augen) am Anfang des Intros – beim Herunterfahren überspringen
 if (Plymouth.GetMode() == "boot")
@@ -364,6 +415,27 @@ base_y = Math.Int((Window.GetHeight() - CANVAS_H) / 2);
 logo = Sprite();
 logo.SetZ(10);
 
+version_sprite = Sprite();
+version_sprite.SetZ(15);
+version_sprite.SetOpacity(0);
+if (VERSION_S > 0)
+{{
+    version_img = Image("version.png");
+    version_sprite.SetImage(version_img);
+    version_sprite.SetPosition(Math.Int((Window.GetWidth() - version_img.GetWidth()) / 2),
+                        Math.Int((Window.GetHeight() - version_img.GetHeight()) / 2), 15);
+}}
+
+fun version_opacity(v)
+{{
+    // 0,4 s einblenden, stehen lassen, 0,4 s ausblenden
+    if (v < 0.4)
+        return v / 0.4;
+    if (v > VERSION_S - 0.4)
+        return (VERSION_S - v) / 0.4;
+    return 1;
+}}
+
 global.t = 0;
 global.last = -1;
 
@@ -378,9 +450,14 @@ fun frame_for(n)
 fun refresh_callback()
 {{
     global.t = global.t + 1 / FPS;
-    if (global.t >= START_DELAY)
+    v = global.t - START_DELAY;
+    if (v >= 0 && v < VERSION_S)
+        version_sprite.SetOpacity(version_opacity(v));
+    else
+        version_sprite.SetOpacity(0);
+    if (global.t >= START_DELAY + VERSION_S)
     {{
-        idx = frame_for(Math.Int((global.t - START_DELAY) * FPS) + SKIP);
+        idx = frame_for(Math.Int((global.t - START_DELAY - VERSION_S) * FPS) + SKIP);
         if (idx != global.last)
         {{
             logo.SetImage(frames[idx]);

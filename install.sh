@@ -262,8 +262,12 @@ remove_guard() {
 
 install_boot() {
   say "Boot animation"
-  local tmp wd=(); tmp=$(mktemp -d)
+  local tmp wd=() ver; tmp=$(mktemp -d)
   [ "${F_GUARD:-n}" = y ] && wd=(--watchdog)   # Wächter-Animation (Augen) vor dem Logo
+  # Programmversion 3 s vor der Animation: aktive Version des Wächters bzw. git-Tag/Commit
+  if [ -L "$BASE/current" ]; then ver=$(basename "$(readlink "$BASE/current")")
+  else ver=$(git -C "$DIR" describe --tags --always 2>/dev/null || echo ""); fi
+  [ -n "$ver" ] && wd+=(--version "$ver")
   "$DIR/venv/bin/python" "$DIR/boot/make_frames.py" "$tmp/raspy" "${wd[@]}" >/dev/null
   sudo rm -rf /usr/share/plymouth/themes/raspy
   sudo cp -r "$tmp/raspy" /usr/share/plymouth/themes/raspy
@@ -302,7 +306,7 @@ EOF
   unit_on raspy-fix-lightdm.service
   sudo plymouth-set-default-theme raspy
   echo "  Updating initramfs (takes a minute) …"
-  sudo update-initramfs -u >/dev/null
+  sudo update-initramfs -u -k "$(uname -r)" >/dev/null   # nur -u wählt auf dem Pi 5 evtl. die falsche Kernel-Variante
   ok "Boot animation installed (originals backed up in /var/backups/raspy)"
 }
 remove_boot() {
@@ -322,7 +326,7 @@ remove_boot() {
   sysedit unblock "$BOOT/config.txt" "raspy boot animation"
   if [ -d /usr/share/plymouth/themes/pix ]; then sudo plymouth-set-default-theme pix; fi
   sudo rm -rf /usr/share/plymouth/themes/raspy /usr/local/share/raspy
-  sudo update-initramfs -u >/dev/null
+  sudo update-initramfs -u -k "$(uname -r)" >/dev/null
 }
 
 configure() {   # Menü, wenn config.env schon existiert, sonst Schritt für Schritt
