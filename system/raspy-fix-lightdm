@@ -1,0 +1,29 @@
+#!/bin/sh
+# Hängt die Boot-Animation wieder in LightDM ein, falls ein Paket-Update sie ausgehängt hat.
+#
+# raindrop (die Bildschirm-Einstellungen von Raspberry Pi OS) setzt bei JEDEM Update
+# display-setup-script in /etc/lightdm/lightdm.conf auf /usr/share/dispsetup.sh zurück –
+# dann fehlt der zweite Teil der Boot-Animation. raspy-display-setup ruft dispsetup.sh am Ende
+# selbst auf, die Bildschirm-Einstellungen bleiben also erhalten.
+#
+# Läuft nach jeder Paketinstallation (apt-Hook /etc/apt/apt.conf.d/99raspy-display-setup)
+# und vor jedem Start von LightDM (raspy-fix-lightdm.service). Ohne Boot-Animation: tut nichts.
+CONF=/etc/lightdm/lightdm.conf
+OURS=/usr/local/sbin/raspy-display-setup
+
+[ -x "$OURS" ] && [ -f "$CONF" ] || exit 0
+grep -q "^display-setup-script=$OURS\$" "$CONF" && exit 0
+
+cur=$(grep "^display-setup-script=" "$CONF" | tail -1 | cut -d= -f2-)
+# das, was das Paket eingetragen hat, wird zum neuen "Original" (raspy-display-setup ruft es auf)
+if [ -n "$cur" ] && [ -d /usr/local/share/raspy ]; then
+  echo "$cur" > /usr/local/share/raspy/orig-display-setup
+fi
+cp -p "$CONF" "$CONF.raspy-before-fix"
+sed -i "s|^#\?display-setup-script=.*|display-setup-script=$OURS|" "$CONF"
+if grep -q "^display-setup-script=$OURS\$" "$CONF"; then
+  logger -t raspy "lightdm.conf: display-setup-script war '${cur:-leer}', wieder auf $OURS gesetzt"
+else
+  logger -t raspy "lightdm.conf: display-setup-script fehlt ganz – bitte ./install.sh ausführen"
+fi
+exit 0

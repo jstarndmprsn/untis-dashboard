@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Fixed
+
+- **The boot animation no longer disappears after system updates.** Raspberry Pi OS's screen
+  settings package (raindrop) resets LightDM's `display-setup-script` on every update, which
+  silently removed the second half of the animation. A small repair script now puts it back after
+  every package installation and before LightDM starts; your screen settings are still applied.
+
 ### Added
 
 - `STATUS_FILE` in `config.env`: another program on the Pi (a Wi-Fi watchdog, a maintenance

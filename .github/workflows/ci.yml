@@ -30,4 +30,4 @@ jobs:
       - name: Install shellcheck
         run: pip install shellcheck-py==0.10.0.1
       - name: shellcheck
-        run: shellcheck install.sh device/kiosk.sh device/screen_schedule.sh system/raspy-update system/raspy-display-setup
+        run: shellcheck install.sh device/kiosk.sh device/screen_schedule.sh system/raspy-update system/raspy-display-setup system/raspy-fix-lightdm

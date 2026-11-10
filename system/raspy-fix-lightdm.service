@@ -1,0 +1,11 @@
+[Unit]
+Description=raspy – Boot-Animation in LightDM wieder einhängen (nach Paket-Updates)
+Before=display-manager.service lightdm.service
+ConditionPathExists=/usr/local/sbin/raspy-display-setup
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/raspy-fix-lightdm
+
+[Install]
+WantedBy=graphical.target

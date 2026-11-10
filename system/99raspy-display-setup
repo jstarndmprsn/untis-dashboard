@@ -1,0 +1,3 @@
+// raspy: nach jeder Paketinstallation die Boot-Animation wieder in LightDM einhängen
+// (raindrop setzt display-setup-script bei Updates zurück, siehe /usr/local/sbin/raspy-fix-lightdm)
+DPkg::Post-Invoke { "if [ -x /usr/local/sbin/raspy-fix-lightdm ]; then /usr/local/sbin/raspy-fix-lightdm; fi"; };

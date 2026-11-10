@@ -252,6 +252,11 @@ install_boot() {
 # kein Firmware-Regenbogen beim Start (Boot-Animation)
 disable_splash=1
 EOF
+  # Paket-Updates (raindrop) hängen die Animation sonst wieder aus – nach jedem apt-Lauf und vor LightDM reparieren
+  put "$DIR/system/raspy-fix-lightdm" /usr/local/sbin/raspy-fix-lightdm 755
+  put "$DIR/system/99raspy-display-setup" /etc/apt/apt.conf.d/99raspy-display-setup 644
+  put "$DIR/system/raspy-fix-lightdm.service" /etc/systemd/system/raspy-fix-lightdm.service 644
+  unit_on raspy-fix-lightdm.service
   sudo plymouth-set-default-theme raspy
   echo "  Updating initramfs (takes a minute) …"
   sudo update-initramfs -u >/dev/null
@@ -265,7 +270,9 @@ remove_boot() {
   sysedit ini-set "$LIGHTDM" 'Seat:*' display-setup-script "$orig"
   sysedit ini-set "$LIGHTDM" 'Seat:*' xserver-command X
   sysedit ini-set "$LIGHTDM" LightDM minimum-vt 7
-  sudo rm -f /etc/systemd/system/lightdm.service.d/raspy-vt.conf /usr/local/sbin/raspy-display-setup
+  unit_off raspy-fix-lightdm.service
+  sudo rm -f /etc/systemd/system/lightdm.service.d/raspy-vt.conf /usr/local/sbin/raspy-display-setup \
+             /usr/local/sbin/raspy-fix-lightdm /etc/apt/apt.conf.d/99raspy-display-setup
   sudo systemctl enable getty@tty1.service >/dev/null 2>&1 || true
   sudo systemctl daemon-reload
   sysedit uncmdline "$BOOT/cmdline.txt"
