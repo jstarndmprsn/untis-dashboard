@@ -186,7 +186,8 @@ def draw(elements):
 
 
 # ── Wächter-Animation (vor dem Logo, nur mit --watchdog) ──
-WD_S = 3.4                      # Dauer in Sekunden
+WD_S = 3.4                      # Dauer des Ablaufs in watchdog_state()
+WD_SLOW = 1.35                  # langsamer abspielen (1 = Originaltempo) -> ca. 4,6 s
 WD_RED = (232, 36, 36)
 WCW, WCH = 600, 330             # eigene, größere Leinwand mit derselben Mitte wie die Logo-Leinwand
 EYE_W, EYE_H, EYE_R = 62, 86, 27
@@ -298,10 +299,10 @@ def save_cropped(img, path):
 def main():
     os.makedirs(OUT, exist_ok=True)
     intro_n, loop_n, outro_n = round(INTRO_S * FPS), round(LOOP_S * FPS), round(OUTRO_S * FPS)
-    wd_n = round(WD_S * FPS) if WATCHDOG else 0
+    wd_n = round(WD_S * WD_SLOW * FPS) if WATCHDOG else 0
     offsets, outro_offsets = [], []
     for i in range(wd_n):          # Wächter-Animation gehört zum Intro (danach baut sich das Logo auf)
-        offsets.append(save_watchdog(draw_watchdog(watchdog_state(i / FPS)), f"{OUT}/f{i}.png"))
+        offsets.append(save_watchdog(draw_watchdog(watchdog_state(i / FPS / WD_SLOW)), f"{OUT}/f{i}.png"))
     for i in range(intro_n):
         offsets.append(save_cropped(draw(intro_state(i / FPS)), f"{OUT}/f{wd_n + i}.png"))
     intro_n += wd_n
