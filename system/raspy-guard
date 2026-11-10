@@ -1,0 +1,18 @@
+#!/bin/sh
+# Starter für den Software-Wächter: prüft vor jedem Lauf die Prüfsumme der installierten
+# Wächter-Datei. Ist sie beschädigt (Stromausfall, defekter Sektor), läuft die vorherige Version.
+LIB=${RASPY_GUARD_LIB:-/usr/local/lib/raspy-guard}
+
+intact() {   # intact DATEI SUMMENDATEI
+  [ -f "$1" ] && [ -f "$2" ] && [ "$(sha256sum "$1" | cut -d' ' -f1)" = "$(tr -d ' \n' < "$2")" ]
+}
+
+if intact "$LIB/raspy_guard.py" "$LIB/raspy_guard.sha256"; then
+  exec python3 "$LIB/raspy_guard.py" "$@"
+elif intact "$LIB/raspy_guard.prev.py" "$LIB/raspy_guard.prev.sha256"; then
+  logger -t raspy-guard "Wächter-Datei beschädigt – nutze die vorherige Version"
+  exec python3 "$LIB/raspy_guard.prev.py" "$@"
+fi
+logger -t raspy-guard "Wächter-Datei und Sicherung beschädigt – bitte ./install.sh ausführen"
+echo "raspy-guard: Wächter-Datei beschädigt – ./install.sh ausführen" >&2
+exit 1

@@ -1,0 +1,15 @@
+[Unit]
+Description=raspy – Software-Wächter: Programmdateien beim Start prüfen und reparieren
+DefaultDependencies=no
+After=local-fs.target
+Before=raspy-web.service raspy-buttons.service raspy-thermal.service display-manager.service lightdm.service
+ConditionPathExists=/usr/local/lib/raspy-guard/raspy_guard.py
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/raspy-guard boot
+TimeoutStartSec=3min
+StandardOutput=journal
+
+[Install]
+WantedBy=multi-user.target

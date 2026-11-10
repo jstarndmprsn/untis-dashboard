@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Added – software watchdog (opt-in extra in `./install.sh`)
+
+- **Installs released versions automatically, only in your time windows.** Tag a release
+  (`git tag v1.2.0 && git push --tags`); the watchdog fetches it, builds and checks it in the
+  background (checksums against git, compile, a test run with demo data) and switches over in the
+  next window you set in `./install.sh --configure` → *Watchdog* (e.g. `Di,Do 11:35-11:50`).
+  Only what changed is restarted; if the page or Untis data don't come back, it goes back to the
+  previous version by itself. Never during a running system update, never by rebooting.
+- **Every version in its own folder** (`releases/<version>`, link `current`). Switching is a single
+  atomic step, so a power cut leaves either the old or the new version – never a mix.
+- **Repairs damaged program files at boot** before the display starts (from git), undoes an
+  interrupted switch, and falls back to the previous version if needed. With the boot animation it
+  shows "Software Watchdog: Programmdateien werden repariert …".
+- **Protects itself:** installed outside the version folders, started through a checksum check; a
+  damaged copy is replaced by the previous one. It updates itself only after a new version has proven itself.
+- Optional: system updates (apt) in the same windows instead of Tuesday 09:45 (`GUARD_APT=1`).
+- Log with the list of changes for every update: `/var/log/raspy-guard.log`; overview: `raspy-guard status`.
+- Boot animation: with the watchdog, two red eyes ("SOFTWARE WATCHDOG" … "ACTIVE") come before the logo.
+
 ### Fixed
 
 - **`./install.sh` over SSH without a terminal no longer stops halfway.** It used `sudo -v`,

@@ -2,6 +2,12 @@
 """
 Erzeugt die Boot-Animation aus dem Logo (logo.svg: 3 Punkte + 2 Säulen).
 
+Mit --watchdog (Software-Wächter installiert) läuft vorher die Wächter-Animation:
+zwei rote Augen, darüber „SOFTWARE WATCHDOG“; sie schauen nach links, rechts, in die Mitte,
+kneifen sich zusammen, darunter erscheint „ACTIVE“. Danach baut sich das Logo auf.
+
+  python3 make_frames.py raspy [--watchdog]
+
 Ausgabe (Ordner raspy/ = Plymouth-Theme):
   f0.png … fN.png   Intro (Aufbau) + Loop (Welle)   -> Plymouth + X-Splash
   o0.png … oM.png   Outro (Ausblenden)              -> nur X-Splash
@@ -17,9 +23,11 @@ import math
 import os
 import sys
 
-from PIL import Image, ImageChops, ImageDraw
+from PIL import Image, ImageChops, ImageDraw, ImageFont
 
-OUT = sys.argv[1] if len(sys.argv) > 1 else "raspy"
+ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
+OUT = ARGS[0] if ARGS else "raspy"
+WATCHDOG = "--watchdog" in sys.argv
 
 FPS = 50
 START_DELAY = 2.0       # Sekunden Schwarz beim Booten, bis der Monitor aufgewacht ist
@@ -177,6 +185,105 @@ def draw(elements):
     return img
 
 
+# ── Wächter-Animation (vor dem Logo, nur mit --watchdog) ──
+WD_S = 3.4                      # Dauer in Sekunden
+WD_RED = (232, 36, 36)
+WCW, WCH = 600, 330             # eigene, größere Leinwand mit derselben Mitte wie die Logo-Leinwand
+EYE_W, EYE_H, EYE_R = 62, 86, 27
+EYE_DX, EYE_Y = 64, 168         # Abstand der Augen von der Mitte, Höhe
+LOOK = 28                       # so weit schauen die Augen zur Seite
+FONTS = ["/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+         "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+         "/Library/Fonts/Arial Bold.ttf"]
+
+
+def font(size):
+    for f in FONTS:
+        if os.path.exists(f):
+            return ImageFont.truetype(f, size)
+    return ImageFont.load_default(size)
+
+
+def spaced_text(dr, text, cx, cy, size, spacing, fill):
+    """Text mit Sperrung, mittig um (cx, cy) – alles in Supersampling-Pixeln."""
+    f = font(size)
+    widths = [dr.textlength(ch, font=f) for ch in text]
+    total = sum(widths) + spacing * (len(text) - 1)
+    x = cx - total / 2
+    asc, desc = f.getmetrics()
+    for ch, w in zip(text, widths):
+        dr.text((x, cy - (asc + desc) / 2), ch, font=f, fill=fill)
+        x += w + spacing
+
+
+def keyframes(t, keys):
+    """Lineare Folge von (Zeit, Wert)-Punkten mit weichem Übergang (ease-in-out) dazwischen."""
+    if t <= keys[0][0]:
+        return keys[0][1]
+    for (t0, v0), (t1, v1) in zip(keys, keys[1:]):
+        if t <= t1:
+            return v0 + (v1 - v0) * ease_in_out_cubic((t - t0) / (t1 - t0))
+    return keys[-1][1]
+
+
+def watchdog_state(t):
+    look = keyframes(t, [(0.70, 0), (1.00, -LOOK), (1.15, -LOOK), (1.60, LOOK), (1.75, LOOK), (2.05, 0)])
+    opening = seg(t, 0.15, 0.40)
+    squint = ease_out_cubic(seg(t, 2.10, 0.25))
+    fade = 1 - seg(t, 3.05, 0.35) ** 2
+    return {
+        "title": ease_out_cubic(seg(t, 0.0, 0.45)) * fade,
+        "eye_o": clamp(opening * 3) * fade,
+        "eye_h": 6 + (EYE_H - 6) * (ease_out_back(opening, 1.2) if opening > 0 else 0.0),
+        "look": look,
+        "squint": squint,
+        "active": ease_out_cubic(seg(t, 2.22, 0.32)) * fade,
+        "active_dy": 10 * (1 - ease_out_cubic(seg(t, 2.22, 0.32))),
+    }
+
+
+def draw_watchdog(st):
+    S = SS
+    alpha = Image.new("L", (WCW * S, WCH * S), 0)
+    dr = ImageDraw.Draw(alpha)
+    cx = WCW / 2
+    if st["title"] > 0:
+        spaced_text(dr, "SOFTWARE WATCHDOG", cx * S, 58 * S, 30 * S, 6 * S, int(255 * st["title"]))
+    if st["eye_o"] > 0:
+        k = st["look"] / LOOK                                   # -1 = links, 1 = rechts
+        h_open = st["eye_h"] * (1 - 0.64 * st["squint"])        # zusammenkneifen
+        for side in (-1, 1):
+            grow = 1 + 0.07 * k * -side                         # Auge in Blickrichtung etwas größer
+            w, h = EYE_W * grow, h_open * grow
+            ex = cx + side * EYE_DX + st["look"]
+            ey = EYE_Y + (EYE_H - h_open) * 0.18 * st["squint"]  # beim Kneifen leicht nach unten
+            layer = Image.new("L", alpha.size, 0)
+            ld = ImageDraw.Draw(layer)
+            box = ((ex - w / 2) * S, (ey - h / 2) * S, (ex + w / 2) * S, (ey + h / 2) * S)
+            ld.rounded_rectangle(box, radius=min(EYE_R * grow, h / 2) * S, fill=int(255 * st["eye_o"]))
+            if st["squint"] > 0:                                # schräges Lid: innen tiefer (entschlossener Blick)
+                drop = h * 0.42 * st["squint"]
+                x0, y0, x1 = box[0] - 4 * S, box[1] - 4 * S, box[2] + 4 * S
+                inner_x, outer_x = (x1, x0) if side < 0 else (x0, x1)
+                ld.polygon([(outer_x, y0), (inner_x, y0), (inner_x, box[1] + drop * S), (outer_x, box[1])], fill=0)
+            alpha = ImageChops.lighter(alpha, layer)
+            dr = ImageDraw.Draw(alpha)
+    if st["active"] > 0:
+        spaced_text(dr, "ACTIVE", cx * S, (282 + st["active_dy"]) * S, 34 * S, 11 * S, int(255 * st["active"]))
+    alpha = alpha.resize((WCW, WCH), Image.LANCZOS)
+    img = Image.new("RGBA", (WCW, WCH), WD_RED + (0,))
+    img.putalpha(alpha)
+    return img
+
+
+def save_watchdog(img, path):
+    """Wie save_cropped, aber der Versatz gilt relativ zur (kleineren) Logo-Leinwand."""
+    x, y = save_cropped(img, path)
+    return x - (WCW - CW) // 2, y - (WCH - CH) // 2
+
+
 def save_cropped(img, path):
     bbox = img.getchannel("A").getbbox()
     if not bbox:
@@ -191,15 +298,19 @@ def save_cropped(img, path):
 def main():
     os.makedirs(OUT, exist_ok=True)
     intro_n, loop_n, outro_n = round(INTRO_S * FPS), round(LOOP_S * FPS), round(OUTRO_S * FPS)
+    wd_n = round(WD_S * FPS) if WATCHDOG else 0
     offsets, outro_offsets = [], []
+    for i in range(wd_n):          # Wächter-Animation gehört zum Intro (danach baut sich das Logo auf)
+        offsets.append(save_watchdog(draw_watchdog(watchdog_state(i / FPS)), f"{OUT}/f{i}.png"))
     for i in range(intro_n):
-        offsets.append(save_cropped(draw(intro_state(i / FPS)), f"{OUT}/f{i}.png"))
+        offsets.append(save_cropped(draw(intro_state(i / FPS)), f"{OUT}/f{wd_n + i}.png"))
+    intro_n += wd_n
     for i in range(loop_n):
         offsets.append(save_cropped(draw(loop_state(i / FPS)), f"{OUT}/f{intro_n + i}.png"))
     for i in range(outro_n):
         outro_offsets.append(save_cropped(draw(outro_state(i / FPS)), f"{OUT}/o{i}.png"))
 
-    meta = {"fps": FPS, "intro_n": intro_n, "loop_n": loop_n, "outro_n": outro_n,
+    meta = {"fps": FPS, "intro_n": intro_n, "loop_n": loop_n, "outro_n": outro_n, "watchdog_n": wd_n,
             "canvas": [CW, CH], "offsets": offsets, "outro_offsets": outro_offsets,
             "start_delay": START_DELAY,
             "loop_rest_from": math.ceil((0.35 + 4 * 0.16 + 0.32) * FPS)}
@@ -232,6 +343,11 @@ if (Plymouth.GetMode() == "boot")
 else
     START_DELAY = 0;
 INTRO_N = {intro_n};
+// Wächter-Animation (rote Augen) am Anfang des Intros – beim Herunterfahren überspringen
+if (Plymouth.GetMode() == "boot")
+    SKIP = 0;
+else
+    SKIP = {wd_n};
 LOOP_N = {loop_n};
 CANVAS_W = {CW};
 CANVAS_H = {CH};
@@ -263,7 +379,7 @@ fun refresh_callback()
     global.t = global.t + 1 / FPS;
     if (global.t >= START_DELAY)
     {{
-        idx = frame_for(Math.Int((global.t - START_DELAY) * FPS));
+        idx = frame_for(Math.Int((global.t - START_DELAY) * FPS) + SKIP);
         if (idx != global.last)
         {{
             logo.SetImage(frames[idx]);
@@ -294,7 +410,7 @@ fun message_callback(text)
 Plymouth.SetDisplayMessageFunction(message_callback);
 """)
     total = sum(os.path.getsize(os.path.join(OUT, n)) for n in os.listdir(OUT))
-    print(f"intro {intro_n}, loop {loop_n}, outro {outro_n} Bilder, {total / 1024:.0f} KB")
+    print(f"intro {intro_n} (davon Wächter {wd_n}), loop {loop_n}, outro {outro_n} Bilder, {total / 1024:.0f} KB")
 
 
 if __name__ == "__main__":

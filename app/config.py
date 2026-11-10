@@ -29,7 +29,9 @@ DEFAULTS = {
     "BUTTON_POWER_GPIO": "27",
     "PORT": "5000",
     "LAN_ACCESS": "0",           # 1 = Webserver auch von anderen Geräten im Netz erreichbar
-    "STATUS_FILE": "",           # optional: Hinweis eines anderen Programms in der Statuszeile von /heute
+    "STATUS_FILE": "",
+    "GUARD_WINDOWS": "",         # Software-Wächter: Zeitfenster für Updates, z. B. "Di,Do 11:35-11:50; Mo-Fr 16:15-18:00"
+    "GUARD_APT": "0",            # 1 = auch die System-Updates (apt) in diese Zeitfenster legen           # optional: Hinweis eines anderen Programms in der Statuszeile von /heute
     "DEMO": "0",                 # 1 = erfundene Beispieldaten statt Untis (zum Ausprobieren)
 }
 

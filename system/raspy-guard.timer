@@ -1,0 +1,10 @@
+[Unit]
+Description=raspy – Software-Wächter alle 2 Minuten
+
+[Timer]
+OnBootSec=3min
+OnUnitInactiveSec=2min
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target

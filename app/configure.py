@@ -303,6 +303,50 @@ def step_screen(cfg):
     ok(screen_summary(cfg))
 
 
+def guard_module():
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "guard"))
+    import raspy_guard
+    return raspy_guard
+
+
+def guard_summary(cfg):
+    if not cfg["GUARD_WINDOWS"]:
+        return c("2", "no time window – updates only with: sudo raspy-guard update-now")
+    rg = guard_module()
+    try:
+        nxt = rg.next_window(cfg["GUARD_WINDOWS"], datetime.now())
+    except ValueError:
+        nxt = None
+    apt = " · also system updates" if config.enabled(cfg, "GUARD_APT") else ""
+    return cfg["GUARD_WINDOWS"] + (f" (next: {nxt:%a %H:%M})" if nxt else "") + apt
+
+
+def step_guard(cfg):
+    print("  The watchdog installs released versions (git tags v…) only in these time windows –")
+    print("  e.g. a break or after school. Download and checks happen before, invisibly; in the window")
+    print("  it only switches over (a few seconds) and goes back by itself if something doesn't work.")
+    print("  Format: days + time, several separated by ';' – e.g.  Di,Do 11:35-11:50; Mo-Fr 16:15-18:00")
+    print("  Days: Mo Di Mi Do Fr Sa So (or Mon Tue …), ranges like Mo-Fr, or 'täglich'. Empty = only by hand.")
+    rg = guard_module()
+    while True:
+        v = ask("Time windows", cfg["GUARD_WINDOWS"])
+        if v == "-":
+            v = ""
+        try:
+            wins = rg.parse_windows(v)
+        except ValueError as e:
+            err(str(e))
+            continue
+        short = [f"{(end - start)} min" for _, start, end in wins if end - start < 2 * rg.MIN_LEFT // 60]
+        if short:
+            warn(f"Very short window ({', '.join(short)}) – the switch needs about {rg.MIN_LEFT // 60} minutes")
+        cfg["GUARD_WINDOWS"] = v
+        break
+    cfg["GUARD_APT"] = "1" if yes("Also run the system updates (apt) in these windows instead of Tuesday 09:45?",
+                                  config.enabled(cfg, "GUARD_APT")) else "0"
+    ok(guard_summary(cfg))
+
+
 def step_buttons(cfg):
     print("  Two push buttons between a GPIO pin and GND (internal pull-up).")
     cfg["BUTTON_TAB_GPIO"] = ask("GPIO of the tab button (switch view)", cfg["BUTTON_TAB_GPIO"])
@@ -324,6 +368,9 @@ SECTIONS = [
      ["SCREEN_SCHEDULE", "SCREEN_ON_FROM", "SCREEN_ON_UNTIL", "SCREEN_IDLE_OFF"],
      "SCREEN_SCHEDULE=1: Mon–Fri between FROM and UNTIL (HHMM) the screen stays on; otherwise off after\n"
      "IDLE_OFF seconds without a button press. SCREEN_SCHEDULE=0: the screen is always on."),
+    ("Software watchdog (only with the watchdog extra)", ["GUARD_WINDOWS", "GUARD_APT"],
+     "GUARD_WINDOWS: when released versions may be installed, e.g. \"Di,Do 11:35-11:50; Mo-Fr 16:15-18:00\"\n"
+     "(empty = only with: sudo raspy-guard update-now). GUARD_APT=1: system updates in the same windows."),
     ("Hardware", ["BUTTON_TAB_GPIO", "BUTTON_POWER_GPIO", "PORT", "LAN_ACCESS", "STATUS_FILE"],
      "BCM GPIO numbers; PORT of the web server.\n"
      "LAN_ACCESS=1: pages also reachable from other devices (no login – only on a network you trust).\n"
@@ -394,10 +441,11 @@ def untis_time(v):
 
 
 # ───────────────────────── wizard + menu ─────────────────────────
-def wizard(cfg, buttons):
+def wizard(cfg, buttons, guard=False):
     """Step by step through everything (first setup)."""
     titles = ["School", "Untis login", "Class", "Calendar (optional)", "Weather (optional)", "Screen schedule"]
     titles += ["Buttons"] if buttons else []
+    titles += ["Software watchdog"] if guard else []
     steps = iter(enumerate(titles, 1))
 
     def head():
@@ -412,6 +460,8 @@ def wizard(cfg, buttons):
     head(); step_screen(cfg)
     if buttons:
         head(); step_buttons(cfg)
+    if guard:
+        head(); step_guard(cfg)
 
 
 def do_school(cfg):
@@ -443,7 +493,7 @@ def screen_summary(cfg):
             f"otherwise off after {idle_minutes(cfg)} min idle")
 
 
-def menu_items(buttons):
+def menu_items(buttons, guard=False):
     dim = lambda s: c("2", s)  # noqa: E731
     items = [
         ("School", lambda g: f"{g['UNTIS_SCHOOL']} on {g['UNTIS_SERVER']}"
@@ -461,12 +511,14 @@ def menu_items(buttons):
     if buttons:
         items.append(("Buttons", lambda g: f"tab = GPIO {g['BUTTON_TAB_GPIO']}, power = GPIO {g['BUTTON_POWER_GPIO']}",
                       step_buttons))
+    if guard:
+        items.append(("Watchdog", guard_summary, step_guard))
     return items
 
 
-def menu(cfg, buttons):
+def menu(cfg, buttons, guard=False):
     """Pick only what you want to change; saves at the end. Returns True if something was saved."""
-    items = menu_items(buttons)
+    items = menu_items(buttons, guard)
     saved = dict(cfg)
     while True:
         dirty = cfg != saved
@@ -511,6 +563,7 @@ def main():
     ap.add_argument("--check", action="store_true", help="only test the current config.env")
     ap.add_argument("--wizard", action="store_true", help="step by step through everything instead of the menu")
     ap.add_argument("--buttons", action="store_true", help="also offer the button GPIO pins")
+    ap.add_argument("--guard", action="store_true", help="also offer the software watchdog's time windows")
     a = ap.parse_args()
 
     cfg = config.load()
@@ -520,9 +573,9 @@ def main():
     print(bold("raspy setup") + f" – {config.CONFIG_FILE}")
     try:
         if cfg["_exists"] and not a.wizard:
-            menu(cfg, a.buttons)
+            menu(cfg, a.buttons, a.guard)
             return
-        wizard(cfg, a.buttons)
+        wizard(cfg, a.buttons, a.guard)
     except (KeyboardInterrupt, EOFError):
         print("\n  Cancelled – nothing was saved.")
         sys.exit(130)

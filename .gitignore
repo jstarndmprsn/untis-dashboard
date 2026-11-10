@@ -7,6 +7,11 @@ config.env.tmp
 
 # lokal erzeugt
 venv/
+venv
+# Software-Wächter (Versions-Ordner, geteilte Python-Umgebungen, Link auf die aktive Version)
+releases/
+venvs/
+current
 .install-state
 __pycache__/
 *.pyc

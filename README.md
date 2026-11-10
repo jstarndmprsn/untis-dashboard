@@ -26,7 +26,8 @@ The display itself is in German (that's where WebUntis is used most); setup and 
 - **Screen schedule** – always on during school hours, off when idle otherwise (or simply always on).
 - Pi extras (all optional): **two hardware buttons** (switch view / hold to shut down),
   **smooth fan curve + overheat protection** (Pi 5), **weekly auto-updates**
-  that are safe to interrupt (off by default), and a **custom boot animation**.
+  that are safe to interrupt (off by default), a **custom boot animation**, and a
+  **software watchdog** that installs released versions by itself (see below).
 
 ## What you need
 
@@ -174,6 +175,42 @@ venv/bin/python app/configure.py --check  # test login, class and calendar
 This removes the services and puts back the system files it changed (backups are in `/var/backups/raspy`).
 Your `config.env` stays until you delete the folder.
 
+## Software watchdog (optional)
+
+For a display nobody wants to touch: the watchdog installs new **released** versions by itself –
+but only in the time windows you choose (a break, after school …), and it repairs damaged program
+files at boot. Turn it on with `./install.sh` (*Software watchdog?* → yes), then set the windows in
+`./install.sh --configure` → *Watchdog*, for example `Di,Do 11:35-11:50; Mo-Fr 16:15-18:00`.
+
+![Watchdog boot animation](docs/watchdog.gif)
+
+- **Only released versions:** git tags like `v1.2.0`. Pushing to `main` alone changes nothing on the Pi.
+  To release: `git tag v1.2.0 && git push --tags`.
+- **Invisible preparation:** the new version is downloaded into its own folder (`releases/v1.2.0`),
+  checked against git (checksums of every file), compiled and started once with demo data – any time,
+  in the background.
+- **A few seconds in the window:** the link `current` is switched in one atomic step and only what
+  changed is restarted. If the page or the Untis data don't come back, it switches back by itself and
+  doesn't try that version again. Never during system updates, never a reboot – changes to the boot
+  animation or kiosk take effect at the next normal start.
+- **At boot** (before the display starts): an interrupted switch is undone, damaged or missing
+  files are restored from git, and if that's not possible the previous version is used.
+- **The watchdog protects itself:** it lives outside the version folders (`/usr/local/lib/raspy-guard`),
+  owned by root; a starter checks its checksum and falls back to the previous copy. It updates itself
+  only after a new version has proven itself.
+- Optional: system updates (apt) in the same windows instead of Tuesday 09:45.
+
+```bash
+raspy-guard status            # active version, waiting update, next window, last results
+sudo raspy-guard update-now   # install the newest release right away (ignores the windows)
+sudo raspy-guard rollback     # back to the previous version
+less /var/log/raspy-guard.log # every update with its list of changes
+```
+
+With the watchdog, everything runs from `releases/<version>` – change settings with
+`./install.sh --configure` as before (it uses the active version). It can't fix a dying SD card:
+that's what backups are for.
+
 ## Project layout
 
 ```
@@ -183,6 +220,7 @@ app/          Flask server: server.py (app + week view page), week.py (week tabl
 tests/        pytest suite (python -m pytest), runs in CI together with shellcheck
 device/       runs on the Pi: buttons, overlays, fan/overheat guard, boot splash, kiosk, screen schedule
 system/       systemd units and config templates used by install.sh
+guard/        software watchdog (raspy_guard.py – Python standard library only)
 boot/         boot animation generator (make_frames.py) and logo
 ```
 

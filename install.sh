@@ -8,6 +8,8 @@
 # Options for an install/update run:
 #   --keep-boot    leave the boot setup (boot animation, cmdline.txt, initramfs) exactly as it is
 #   --no-reboot    don't offer a reboot at the end (e.g. when working remotely over SSH)
+#   --apply        no questions, boot setup untouched, no reboot – used by the software watchdog
+#                  after it switched to a new release (only installs packages that are missing)
 #
 # Needs Raspberry Pi OS with desktop (Debian 12/13). Asks for sudo when it needs it.
 set -euo pipefail
@@ -19,13 +21,23 @@ SYSEDIT="$DIR/system/sysedit.py"
 LIGHTDM=${LIGHTDM:-/etc/lightdm/lightdm.conf}
 BOOT=${BOOT:-/boot/firmware}; [ -d "$BOOT" ] || BOOT=/boot
 ORIG_SETUP=""
-KEEP_BOOT=n NO_REBOOT=n
+KEEP_BOOT=n NO_REBOOT=n QUIET=n RESUME=n
+PASS=()   # Optionen, die beim Neustart aus dem Versions-Ordner weitergegeben werden
 for arg in "$@"; do
   case "$arg" in
-    --keep-boot) KEEP_BOOT=y ;;
-    --no-reboot) NO_REBOOT=y ;;
+    --keep-boot) KEEP_BOOT=y; PASS+=("$arg") ;;
+    --no-reboot) NO_REBOOT=y; PASS+=("$arg") ;;
+    --apply)     QUIET=y KEEP_BOOT=y NO_REBOOT=y ;;
+    --resume)    QUIET=y RESUME=y ;;   # intern: Fortsetzung nach dem Wechsel in den Versions-Ordner
   esac
 done
+
+# Mit Software-Wächter liegt das Programm in BASE/releases/<version>, BASE/current zeigt auf die aktive
+case "$DIR" in
+  */current)    BASE=${DIR%/current} ;;
+  */releases/*) BASE=${DIR%/releases/*} ;;
+  *)            BASE=$DIR ;;
+esac
 
 # ───────────────────────── helpers ─────────────────────────
 say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
@@ -33,9 +45,9 @@ ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
 warn() { printf '  \033[33m!\033[0m %s\n' "$*"; }
 die()  { printf '  \033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
-ask_yn() {   # ask_yn "Question" y|n  -> exit code 0 = yes
+ask_yn() {   # ask_yn "Question" y|n  -> exit code 0 = yes   (--apply/--resume: ohne Frage die Vorauswahl)
   local a hint="y/N"; [ "$2" = y ] && hint="Y/n"
-  read -r -p "  $1 [$hint]: " a </dev/tty || a=""
+  if [ "$QUIET" = y ]; then a=""; else read -r -p "  $1 [$hint]: " a </dev/tty || a=""; fi
   a=${a:-$2}; [[ $a =~ ^[YyJj] ]]
 }
 
@@ -61,8 +73,8 @@ setting() {  # Wert aus config.env (ohne Anführungszeichen)
 # shellcheck source=/dev/null
 load_state() { if [ -f "$STATE" ]; then . "$STATE"; fi; }
 save_state() {
-  printf 'F_BUTTONS=%s\nF_FAN=%s\nF_UPDATES=%s\nF_BOOT=%s\n' \
-    "$F_BUTTONS" "$F_FAN" "$F_UPDATES" "$F_BOOT" > "$STATE"
+  printf 'F_BUTTONS=%s\nF_FAN=%s\nF_UPDATES=%s\nF_BOOT=%s\nF_GUARD=%s\n' \
+    "$F_BUTTONS" "$F_FAN" "$F_UPDATES" "$F_BOOT" "$F_GUARD" > "$STATE"
 }
 
 unit_on()  { sudo systemctl daemon-reload; sudo systemctl enable "$@" >/dev/null 2>&1; }
@@ -76,7 +88,7 @@ command -v apt-get >/dev/null || die "This installer needs Raspberry Pi OS / Deb
 MODEL="$( { tr -d '\0' < /proc/device-tree/model; } 2>/dev/null || echo "unknown device")"
 IS_PI=n;  [[ $MODEL == Raspberry\ Pi* ]] && IS_PI=y
 IS_PI5=n; [[ $MODEL == Raspberry\ Pi\ 5* ]] && IS_PI5=y
-F_BUTTONS="" F_FAN="" F_SCREEN="" F_UPDATES="" F_BOOT=""
+F_BUTTONS="" F_FAN="" F_SCREEN="" F_UPDATES="" F_BOOT="" F_GUARD=""
 load_state
 
 # ───────────────────────── features: install / remove ─────────────────────────
@@ -213,19 +225,46 @@ install_updates() {
     put "$DIR/system/$u" "/etc/systemd/system/$u" 644
   done
   install_sudoers
-  unit_on raspy-update.timer raspy-update-recover.service
-  sudo systemctl start raspy-update.timer
-  ok "Every Tuesday 09:45 in the background (log: /var/log/raspy-update.log)"
+  if [ "${F_GUARD:-n}" = y ] && [[ "$(setting GUARD_APT)" =~ ^(1|yes|true|ja)$ ]]; then
+    unit_on raspy-update-recover.service
+    sudo systemctl disable --now raspy-update.timer >/dev/null 2>&1 || true
+    ok "In the watchdog's time windows, about once a week (log: /var/log/raspy-update.log)"
+  else
+    unit_on raspy-update.timer raspy-update-recover.service
+    sudo systemctl start raspy-update.timer
+    ok "Every Tuesday 09:45 in the background (log: /var/log/raspy-update.log)"
+  fi
 }
 remove_updates() {
   unit_off raspy-update.timer raspy-update-recover.service raspy-update.service
   sudo rm -f /usr/local/sbin/raspy-update
 }
 
+install_guard() {
+  say "Software watchdog"
+  # Wächter-Datei atomar installieren (alte bleibt als Rückfall), Starter prüft die Prüfsumme
+  sudo python3 "$DIR/guard/raspy_guard.py" install-self "$DIR/guard/raspy_guard.py" >/dev/null
+  put "$DIR/system/raspy-guard" /usr/local/sbin/raspy-guard 755
+  printf 'BASE=%s\nOWNER=%s\n' "$BASE" "$ME" | sudo tee /etc/raspy-guard.conf >/dev/null
+  for u in raspy-guard.service raspy-guard.timer raspy-guard-boot.service; do
+    put "$DIR/system/$u" "/etc/systemd/system/$u" 644
+  done
+  unit_on raspy-guard.timer raspy-guard-boot.service
+  sudo systemctl start raspy-guard.timer
+  local w; w=$(setting GUARD_WINDOWS)
+  ok "Installs released versions (git tags v…) in: ${w:-no time window yet – set one with ./install.sh --configure}"
+  ok "Status: raspy-guard status · log: /var/log/raspy-guard.log"
+}
+remove_guard() {
+  unit_off raspy-guard.timer raspy-guard.service raspy-guard-boot.service
+  sudo rm -rf /usr/local/sbin/raspy-guard /usr/local/lib/raspy-guard /etc/raspy-guard.conf
+}
+
 install_boot() {
   say "Boot animation"
-  local tmp; tmp=$(mktemp -d)
-  "$DIR/venv/bin/python" "$DIR/boot/make_frames.py" "$tmp/raspy" >/dev/null
+  local tmp wd=(); tmp=$(mktemp -d)
+  [ "${F_GUARD:-n}" = y ] && wd=(--watchdog)   # Wächter-Animation (Augen) vor dem Logo
+  "$DIR/venv/bin/python" "$DIR/boot/make_frames.py" "$tmp/raspy" "${wd[@]}" >/dev/null
   sudo rm -rf /usr/share/plymouth/themes/raspy
   sudo cp -r "$tmp/raspy" /usr/share/plymouth/themes/raspy
   rm -rf "$tmp"
@@ -289,6 +328,7 @@ remove_boot() {
 configure() {   # Menü, wenn config.env schon existiert, sonst Schritt für Schritt
   local flags=()
   [ "${F_BUTTONS:-n}" = y ] && flags+=(--buttons)
+  [ "${F_GUARD:-n}" = y ] && flags+=(--guard)
   "$DIR/venv/bin/python" "$DIR/app/configure.py" "${flags[@]}" "$@" </dev/tty
 }
 
@@ -302,11 +342,17 @@ migrate_screen() {
 }
 
 # ───────────────────────── modes ─────────────────────────
+# Mit Wächter immer aus der aktiven Version arbeiten (BASE selbst ist nur noch der git-Speicher)
+if [ "${F_GUARD:-n}" = y ] && [ "$DIR" = "$BASE" ] && [ -x "$BASE/current/install.sh" ] && [ "$RESUME" = n ] \
+   && { [ "${1:-}" = "--configure" ] || [ "${1:-}" = "--uninstall" ]; }; then
+  exec "$BASE/current/install.sh" "$@"
+fi
+
 if [ "${1:-}" = "--uninstall" ]; then
   say "Uninstall raspy"
   ask_yn "Remove all raspy services and system changes from this Pi?" n || exit 0
   need_sudo
-  remove_boot; remove_updates; remove_screen; remove_fan; remove_buttons; remove_kiosk
+  remove_guard; remove_boot; remove_updates; remove_screen; remove_fan; remove_buttons; remove_kiosk
   unit_off raspy-web.service
   sudo rm -f /etc/sudoers.d/raspy /etc/tmpfiles.d/raspy.conf
   rm -f "$STATE"
@@ -324,6 +370,7 @@ if [ "${1:-}" = "--configure" ]; then
   sudo systemctl restart raspy-web.service && ok "Web server restarted"
   if [ "${F_BUTTONS:-n}" = y ]; then sudo systemctl restart raspy-buttons.service || true; fi
   install_screen
+  if [ "${F_GUARD:-n}" = y ] && [ "${F_UPDATES:-n}" = y ]; then install_updates; fi   # GUARD_APT geändert?
   exit 0
 fi
 
@@ -348,36 +395,62 @@ if [ "$KEEP_BOOT" = y ]; then
 else
   ask_yn "Custom boot animation (changes boot settings – advanced)?" "$(def "$F_BOOT" n)" && F_BOOT=y || F_BOOT=n
 fi
+ask_yn "Software watchdog (installs released versions automatically in your time windows, repairs damaged program files at boot)?" "$(def "$F_GUARD" n)" && F_GUARD=y || F_GUARD=n
 [ "$IS_PI" = y ] || [ "$F_BUTTONS$F_BOOT" = nn ] || warn "This does not look like a Raspberry Pi – buttons/boot animation may not work."
 
 say "Packages"
 need_sudo
-PKGS=(python3-venv python3-pip curl xdotool x11-xserver-utils unclutter)
+PKGS=(python3-venv python3-pip curl git xdotool x11-xserver-utils unclutter)
 if ! command -v chromium >/dev/null && ! command -v chromium-browser >/dev/null; then
   if apt-cache show chromium >/dev/null 2>&1; then PKGS+=(chromium); else PKGS+=(chromium-browser); fi
 fi
 [ "$F_BUTTONS" = y ] && PKGS+=(python3-gpiozero python3-lgpio)
 [ "$F_BUTTONS$F_FAN$F_BOOT" != nnn ] && PKGS+=(python3-tk python3-pil fonts-noto-core)
 [ "$F_BOOT" = y ] && [ "$KEEP_BOOT" = n ] && PKGS+=(plymouth)
-sudo apt-get update -q >/dev/null
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q "${PKGS[@]}" || die "apt-get install failed (see above)"
-ok "Installed: ${PKGS[*]}"
+MISSING=()
+for p in "${PKGS[@]}"; do dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q "ok installed" || MISSING+=("$p"); done
+if [ ${#MISSING[@]} -eq 0 ]; then
+  ok "All packages already installed"
+else
+  sudo apt-get update -q >/dev/null
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q "${MISSING[@]}" || die "apt-get install failed (see above)"
+  ok "Installed: ${MISSING[*]}"
+fi
 
 say "Python environment"
-[ -x "$DIR/venv/bin/python" ] || python3 -m venv "$DIR/venv"
-"$DIR/venv/bin/pip" install -q --upgrade pip
-"$DIR/venv/bin/pip" install -q -r "$DIR/app/requirements.txt"
-ok "venv ready ($DIR/venv, packages from app/requirements.txt)"
+if [ "$QUIET" = y ] && "$DIR/venv/bin/python" -c "import flask, waitress, requests, icalendar, recurring_ical_events, psutil" 2>/dev/null; then
+  ok "venv ready ($DIR/venv)"
+else
+  [ -x "$DIR/venv/bin/python" ] || python3 -m venv "$DIR/venv"
+  "$DIR/venv/bin/pip" install -q --upgrade pip
+  "$DIR/venv/bin/pip" install -q -r "$DIR/app/requirements.txt"
+  ok "venv ready ($DIR/venv, packages from app/requirements.txt)"
+fi
 
 say "Settings"
 migrate_screen
 if [ -f "$DIR/config.env" ] && ! ask_yn "config.env already exists – change settings now?" n; then
   ok "Keeping config.env"
+elif [ "$QUIET" = y ]; then
+  die "config.env is missing – run ./install.sh once by hand"
 else
   configure
 fi
 
 save_state
+
+# Software-Wächter: beim ersten Mal den aktuellen Stand als erste Version übernehmen und den Rest
+# aus dem Versions-Ordner installieren, damit alle Dienste über BASE/current starten
+if [ "$F_GUARD" = y ] && [ "$DIR" != "$BASE/current" ]; then
+  install_guard
+  say "Release layout"
+  sudo /usr/local/sbin/raspy-guard adopt || die "Could not set up the first release (see /var/log/raspy-guard.log)"
+  ok "Active release: $(readlink "$BASE/current")"
+  if [ "$DIR" = "$BASE" ] && [ -n "$(git -C "$BASE" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+    warn "Local changes in $BASE are not part of the release – updates now come as released versions (git tags)"
+  fi
+  exec "$BASE/current/install.sh" --resume "${PASS[@]}"
+fi
 install_web
 install_kiosk
 if [ "$F_BUTTONS" = y ]; then install_buttons; else remove_buttons; fi
@@ -387,6 +460,7 @@ if [ "$F_UPDATES" = y ]; then install_updates; else remove_updates; fi
 if [ "$KEEP_BOOT" = y ]; then say "Boot animation"; ok "Left unchanged (--keep-boot)"
 elif [ "$F_BOOT" = y ]; then install_boot
 else remove_boot; fi
+if [ "$F_GUARD" = y ]; then install_guard; else remove_guard; fi
 [ "$F_BUTTONS$F_FAN$F_UPDATES" = nnn ] && sudo rm -f /etc/sudoers.d/raspy
 
 PORT=$(setting PORT); PORT=${PORT:-5000}
@@ -398,8 +472,14 @@ else
 fi
 echo "  Change settings later:     ./install.sh --configure"
 echo "  Logs:                      journalctl -u raspy-web -f"
+if [ "$F_GUARD" = y ]; then
+  echo "  Updates:                   tag a release (git tag v1.2.0 && git push --tags) – the watchdog installs it"
+  echo "                             in your time window; right away: sudo raspy-guard update-now"
+fi
 if [ "$NO_REBOOT" = y ]; then
   echo "  Not rebooting (--no-reboot). Start the kiosk now with: sudo systemctl restart lightdm"
-elif ask_yn "Reboot now to start the kiosk?" y; then
+elif [ "$RESUME" = y ] && [ -t 0 ] && { read -r -p "  Reboot now to start the kiosk? [Y/n]: " a </dev/tty || a=n; [[ ${a:-y} =~ ^[YyJj] ]]; }; then
+  sudo reboot
+elif [ "$QUIET" = n ] && ask_yn "Reboot now to start the kiosk?" y; then
   sudo reboot
 fi
