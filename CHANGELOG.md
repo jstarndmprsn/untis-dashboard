@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- **`./install.sh` over SSH without a terminal no longer stops halfway.** It used `sudo -v`,
+  which asks for a password even when sudo otherwise works without one.
 - **The boot animation no longer disappears after system updates.** Raspberry Pi OS's screen
   settings package (raindrop) resets LightDM's `display-setup-script` on every update, which
   silently removed the second half of the animation. A small repair script now puts it back after

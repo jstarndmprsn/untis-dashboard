@@ -50,6 +50,10 @@ put() {      # put SRC DEST MODE   (Vorlage rendern und mit sudo installieren)
 
 sysedit() { sudo python3 "$SYSEDIT" "$@"; }   # Sicherungen: /var/backups/raspy
 
+# nicht "sudo -v": das fragt nach dem Passwort, auch wenn sudo sonst ohne Passwort geht
+# (verifypw=all) – über SSH ohne Terminal bricht der Installer dann mitten im Umbau ab
+need_sudo() { sudo true || die "This needs sudo rights."; }
+
 setting() {  # Wert aus config.env (ohne Anführungszeichen)
   grep -E "^$1=" "$DIR/config.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d "\"' " || true
 }
@@ -301,7 +305,7 @@ migrate_screen() {
 if [ "${1:-}" = "--uninstall" ]; then
   say "Uninstall raspy"
   ask_yn "Remove all raspy services and system changes from this Pi?" n || exit 0
-  sudo -v
+  need_sudo
   remove_boot; remove_updates; remove_screen; remove_fan; remove_buttons; remove_kiosk
   unit_off raspy-web.service
   sudo rm -f /etc/sudoers.d/raspy /etc/tmpfiles.d/raspy.conf
@@ -347,7 +351,7 @@ fi
 [ "$IS_PI" = y ] || [ "$F_BUTTONS$F_BOOT" = nn ] || warn "This does not look like a Raspberry Pi – buttons/boot animation may not work."
 
 say "Packages"
-sudo -v
+need_sudo
 PKGS=(python3-venv python3-pip curl xdotool x11-xserver-utils unclutter)
 if ! command -v chromium >/dev/null && ! command -v chromium-browser >/dev/null; then
   if apt-cache show chromium >/dev/null 2>&1; then PKGS+=(chromium); else PKGS+=(chromium-browser); fi
