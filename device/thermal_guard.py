@@ -2,6 +2,10 @@
 """
 Überhitzungsschutz + stufenlose Lüftersteuerung (läuft als raspy-thermal.service).
 
+Alle Schwellen, die Lüfterkurve, der Temperatursensor und der Lüfter-Name stehen in config.env
+(THERMAL_*, FAN_*; Standardwerte für den Pi 5 mit Active Cooler, siehe docs/hardware.md).
+Ohne passenden Lüfter (andere Pi-Modelle) läuft nur der Überhitzungsschutz.
+
 Lüfter:
   Statt der 4 harten Kernel-Stufen wird die Drehzahl gleitend nach FAN_CURVE
   gesetzt und nur langsam verändert (kein hörbares Hochspringen).
@@ -35,15 +39,19 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app"))
 import config  # noqa: E402
 
-CRIT_TEMP = 85.0       # ab hier kritisch (Pi 5 drosselt selbst ab ~85 °C)
-CRIT_SECONDS = 10      # so lange muss es kritisch bleiben, bevor gewarnt wird
-PANIC_TEMP = 90.0      # ab hier sofort Countdown
-ABORT_TEMP = 82.0      # darunter wird der Countdown abgebrochen
-COUNTDOWN = 20         # Sekunden Warnung vor dem Herunterfahren
+CFG = config.load()
+_T = config.thermal_limits(CFG)
+CRIT_TEMP = _T["THERMAL_CRIT"]                 # ab hier kritisch (Pi 5 drosselt selbst ab ~85 °C)
+CRIT_SECONDS = _T["THERMAL_CRIT_SECONDS"]      # so lange muss es kritisch bleiben, bevor gewarnt wird
+PANIC_TEMP = _T["THERMAL_PANIC"]               # ab hier sofort Countdown
+ABORT_TEMP = _T["THERMAL_ABORT"]               # darunter wird der Countdown abgebrochen
+COUNTDOWN = int(_T["THERMAL_COUNTDOWN"])       # Sekunden Warnung vor dem Herunterfahren
+SENSOR = CFG["THERMAL_SENSOR"] or config.DEFAULTS["THERMAL_SENSOR"]
+FAN_NAME = CFG["FAN_HWMON"] or config.DEFAULTS["FAN_HWMON"]
 
-# (°C, PWM 0–255) – dazwischen linear. Gemessen: PWM 60≈1.600, 100≈3.100,
-# 125≈3.900, 150≈4.750, 200≈6.300, 255≈8.100 U/min
-FAN_CURVE = [(45, 0), (50, 55), (60, 70), (68, 100), (73, 120), (77, 150), (80, 200), (83, 255)]
+# (°C, PWM 0–255) – dazwischen linear. Standard für den Pi 5 Active Cooler, gemessen: PWM 60≈1.600,
+# 100≈3.100, 125≈3.900, 150≈4.750, 200≈6.300, 255≈8.100 U/min
+FAN_CURVE = config.fan_curve(CFG)
 FAN_STEP_UP = 3        # max. PWM-Änderung pro Sekunde nach oben (sanft)
 FAN_STEP_DOWN = 1      # nach unten noch langsamer (kein Pendeln)
 FAN_SMOOTH = 0.15      # Glättung der Temperatur (EMA)
@@ -58,7 +66,7 @@ sys.stdout.reconfigure(line_buffering=True)
 
 
 def read_temp(fake_file):
-    path = fake_file or "/sys/class/thermal/thermal_zone0/temp"
+    path = fake_file or SENSOR
     try:
         with open(path) as f:
             v = float(f.read().strip())
@@ -84,7 +92,7 @@ class Fan:
         self.dir = None
         for d in glob.glob("/sys/class/hwmon/hwmon*"):   # Nummer nicht stabil -> per Name
             try:
-                if open(os.path.join(d, "name")).read().strip() == "pwmfan":
+                if open(os.path.join(d, "name")).read().strip() == FAN_NAME:
                     self.dir = d
             except OSError:
                 pass
@@ -122,14 +130,14 @@ class Fan:
             self.smooth_temp + FAN_SMOOTH * (temp - self.smooth_temp)
         target = fan_target(self.smooth_temp)
         if temp >= FAN_CURVE[-1][0]:
-            target = 255           # Notfall: sofort voll, ohne Rampe
+            target = FAN_CURVE[-1][1]   # Notfall: sofort auf die letzte Stufe, ohne Rampe
         if self.pwm is None:
             try:
                 self.pwm = int(open(os.path.join(self.dir, "pwm1")).read())
             except (OSError, ValueError):
                 self.pwm = target
         if target > self.pwm:
-            new = target if target == 255 else min(target, self.pwm + FAN_STEP_UP)
+            new = target if temp >= FAN_CURVE[-1][0] else min(target, self.pwm + FAN_STEP_UP)
         else:
             new = max(target, self.pwm - FAN_STEP_DOWN)
         try:
@@ -153,7 +161,8 @@ def write_state(state, temp, countdown_end=None, fan=None):
         "state": state, "temp": temp, "updated": time.time(),
         "crit_temp": CRIT_TEMP, "crit_seconds": CRIT_SECONDS,
         "abort_temp": ABORT_TEMP, "countdown": COUNTDOWN, "countdown_end": countdown_end,
-        "fan_mode": "software" if fan else "kernel",
+        # software = diese Kurve, none = kein Lüfter gefunden (z. B. Pi 4 ohne PWM-Lüfter), kernel = Test-Lauf
+        "fan_mode": ("software" if fan.dir else "none") if fan else "kernel",
         "fan_pwm": fan.pwm if fan else None,
         "fan_target": fan_target(fan.smooth_temp) if fan and fan.smooth_temp is not None else None,
         "fan_curve": FAN_CURVE,
@@ -210,8 +219,11 @@ def main():
 
 def run(a, fan):
     state, crit_since, end_at, overlay = "ok", None, None, None
-    print(f"Überhitzungsschutz aktiv: kritisch ab {CRIT_TEMP} °C ({CRIT_SECONDS} s), "
-          f"Countdown {COUNTDOWN} s, Abbruch unter {ABORT_TEMP} °C" + (" [DRY-RUN]" if a.dry_run else ""))
+    print(f"Überhitzungsschutz aktiv: kritisch ab {CRIT_TEMP:g} °C ({CRIT_SECONDS:g} s), sofort ab {PANIC_TEMP:g} °C, "
+          f"Countdown {COUNTDOWN} s, Abbruch unter {ABORT_TEMP:g} °C, Sensor {SENSOR}" + (" [DRY-RUN]" if a.dry_run else ""))
+    if fan is not None:
+        print(f"Lüfter: {fan.dir or f'kein hwmon-Gerät „{FAN_NAME}“ gefunden – nur Überhitzungsschutz'}, "
+              f"Kurve {' '.join(f'{t:g}:{p}' for t, p in FAN_CURVE)}")
 
     while True:
         temp = read_temp(a.fake_temp_file)

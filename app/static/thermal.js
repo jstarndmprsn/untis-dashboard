@@ -74,6 +74,7 @@ function statusOf(d) {
   if (!g.alive) { bump("warn"); notes.push(["warn", "▲", "Überhitzungsschutz läuft nicht"]); }
   else notes.push(["good", "●", `Notabschaltung ab ${g.crit_temp} °C (nach ${g.crit_seconds} s), Abbruch unter ${g.abort_temp} °C`]);
   if (g.alive && g.fan_mode === "software") notes.push(["good", "●", "Lüfter: stufenlose Kurve (Kernel-Notfallkurve ab 82 °C)"]);
+  else if (g.alive && g.fan_mode === "none") notes.push(["good", "●", "Kein Lüfter erkannt – nur Überhitzungsschutz"]);
   else { bump("warn"); notes.push(["warn", "▲", "Lüfter nur über Kernel-Notfallkurve gesteuert"]); }
   if (th && !th.now.length && !th.since_boot.length) notes.push(["good", "●", "Keine Drosselung oder Unterspannung"]);
   return { level, notes };
@@ -100,7 +101,8 @@ function render(d) {
   $("s-temp").innerHTML = tempTag(c.temp, lim);
   $("v-fan").innerHTML = c.rpm != null ? `${c.rpm.toLocaleString("de-DE")}<small>U/min</small>` : "–";
   const soft = d.guard.alive && d.guard.fan_mode === "software";
-  $("s-fan").textContent = `${c.pwm_pct ?? "–"} % · ${soft ? "stufenlose Kurve" : "Kernel-Stufe " + c.stage + "/" + c.stage_max}`;
+  $("s-fan").textContent = c.pwm_pct == null && c.stage == null ? "kein Lüfter erkannt"
+    : `${c.pwm_pct ?? "–"} % · ${soft ? "stufenlose Kurve" : "Kernel-Stufe " + c.stage + "/" + c.stage_max}`;
   $("v-cpu").innerHTML = `${Math.round(c.cpu)}<small>%</small>`;
   $("s-cpu").textContent = `${c.freq_ghz ?? "–"} GHz · Last ${c.load.join(" / ")}`;
   $("v-mem").innerHTML = `${c.mem_pct}<small>%</small>`;
@@ -108,7 +110,8 @@ function render(d) {
   $("s-mem").textContent = `${c.mem_used_gb} von ${c.mem_total_gb} GB · läuft seit ${h} h ${m} min`;
 
   const H = d.hist;
-  lineChart($("c-temp"), H.t, H.temp, { min: 30, max: 90, unit: "°", fmt: (v) => Math.round(v),
+  const tMax = Math.max(90, Math.ceil(((d.guard.alive && d.guard.crit_temp) || 0) / 10) * 10 + 10);
+  lineChart($("c-temp"), H.t, H.temp, { min: 30, max: tMax, unit: "°", fmt: (v) => Math.round(v),
     refs: [
       { v: lim.warn, label: "warm", color: "var(--warn)" },
       ...(d.guard.alive ? [{ v: d.guard.crit_temp, label: "Notabschaltung", color: "var(--crit)" }] : []),
@@ -126,7 +129,11 @@ function render(d) {
 async function refresh() {
   try {
     const r = await fetch("/api/thermal", { cache: "no-store" });
-    if (r.ok) render(await r.json());
+    if (!r.ok) return;
+    // neuer Stand auf dem Server (Update, geänderte Bildschirm-Einstellungen) -> einmal neu laden
+    const v = r.headers.get("X-Version");
+    if (v && v !== document.documentElement.dataset.version) { location.reload(); return; }
+    render(await r.json());
   } catch (e) { /* Server kurz weg -> alten Stand behalten */ }
 }
 

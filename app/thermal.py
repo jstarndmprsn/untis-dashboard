@@ -25,10 +25,17 @@ SAMPLE_INTERVAL = 2          # Sekunden
 HISTORY_SECONDS = 15 * 60
 GUARD_STATE_FILE = os.path.join(config.run_dir(), "thermal_guard.json")
 
-# Anzeige-Schwellen (die Notabschaltung selbst kommt aus thermal_guard.py)
-TEMP_WARN = 75
-TEMP_FAN_EMERGENCY = 80       # ab hier dreht der Lüfter stark auf (Software-Kurve in thermal_guard.py)
-FAN_MAX_RPM = 9200            # PWM 255 gemessen (warm: bis ~9.100)
+# Anzeige-Schwellen kommen aus config.env (THERMAL_WARN, FAN_CURVE, FAN_MAX_RPM, siehe init);
+# die Notabschaltung selbst macht thermal_guard.py.
+FAN_STRONG_PWM = 200          # ab dieser Lüfterstufe der Kurve heißt es "heiß – Lüfter dreht stark auf"
+
+
+def display_limits(cfg):
+    """Schwellen für die Anzeige: warm, heiß (ab hier dreht der Lüfter stark auf), Drehzahl-Skala."""
+    curve = config.fan_curve(cfg, warn=False)
+    strong = next((t for t, pwm in curve if pwm >= FAN_STRONG_PWM), curve[-1][0])
+    return {"warn": config.thermal_limits(cfg, warn=False)["THERMAL_WARN"], "fan_emergency": strong,
+            "fan_max_rpm": config.number(cfg, "FAN_MAX_RPM", warn=False)}
 
 
 def _read(path, cast=str):
@@ -39,10 +46,10 @@ def _read(path, cast=str):
         return None
 
 
-def _find_fan_hwmon():
-    # hwmon-Nummer ist nicht stabil -> per Name suchen
+def _find_fan_hwmon(name="pwmfan"):
+    # hwmon-Nummer ist nicht stabil -> per Name suchen (FAN_HWMON in config.env)
     for d in glob.glob("/sys/class/hwmon/hwmon*"):
-        if _read(os.path.join(d, "name")) == "pwmfan":
+        if _read(os.path.join(d, "name")) == name:
             return d
     return None
 
@@ -71,18 +78,19 @@ def read_throttled():
 
 
 class Sampler:
-    def __init__(self):
+    def __init__(self, sensor="/sys/class/thermal/thermal_zone0/temp", fan_name="pwmfan"):
         n = HISTORY_SECONDS // SAMPLE_INTERVAL
         self.hist = {k: deque(maxlen=n) for k in ("t", "temp", "cpu", "rpm")}
         self.cur = {}
         self.throttled = None
-        self.fan = _find_fan_hwmon()
+        self.sensor = sensor
+        self.fan = _find_fan_hwmon(fan_name)
         self.cool = _cooling_device()
         self.lock = threading.Lock()
         psutil.cpu_percent(percpu=True)  # Startwert
 
     def sample(self):
-        temp = _read("/sys/class/thermal/thermal_zone0/temp", int)
+        temp = _read(self.sensor, int)
         temp = round(temp / 1000, 1) if temp is not None else None
         per_core = psutil.cpu_percent(percpu=True)
         cpu = round(sum(per_core) / len(per_core), 1) if per_core else 0
@@ -149,9 +157,12 @@ def guard_state():
 _sampler = None
 
 
-def init(app):
+def init(app, cfg=None):
     global _sampler
-    _sampler = Sampler()
+    cfg = cfg or config.load()
+    _sampler = Sampler(cfg["THERMAL_SENSOR"] or config.DEFAULTS["THERMAL_SENSOR"],
+                       cfg["FAN_HWMON"] or config.DEFAULTS["FAN_HWMON"])
+    limits = display_limits(cfg)
 
     @app.route("/thermal")
     def thermal_page():
@@ -163,7 +174,7 @@ def init(app):
         return jsonify({
             "cur": cur, "hist": hist, "throttled": throttled,
             "procs": top_processes(), "guard": guard_state(),
-            "limits": {"warn": TEMP_WARN, "fan_emergency": TEMP_FAN_EMERGENCY, "fan_max_rpm": FAN_MAX_RPM},
+            "limits": limits,
         })
 
 

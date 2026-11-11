@@ -52,7 +52,9 @@ ask_yn() {   # ask_yn "Question" y|n  -> exit code 0 = yes   (--apply/--resume: 
 }
 
 render() {   # Platzhalter in Vorlagen ersetzen
-  sed -e "s|@DIR@|$DIR|g" -e "s|@USER@|$ME|g" -e "s|@HOME@|$HOME|g" -e "s|@ORIG_SETUP@|$ORIG_SETUP|g" "$1"
+  local fan; fan=$(fan_name)
+  sed -e "s|@DIR@|$DIR|g" -e "s|@USER@|$ME|g" -e "s|@HOME@|$HOME|g" -e "s|@ORIG_SETUP@|$ORIG_SETUP|g" \
+      -e "s|@FAN_HWMON@|$fan|g" "$1"
 }
 
 put() {      # put SRC DEST MODE   (Vorlage rendern und mit sudo installieren)
@@ -68,6 +70,10 @@ need_sudo() { sudo true || die "This needs sudo rights."; }
 
 setting() {  # Wert aus config.env (ohne Anführungszeichen)
   grep -E "^$1=" "$DIR/config.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d "\"' " || true
+}
+
+fan_name() {  # hwmon-Name des Lüfters (FAN_HWMON), nur sichere Zeichen
+  local f; f=$(setting FAN_HWMON | tr -cd 'A-Za-z0-9_-'); echo "${f:-pwmfan}"
 }
 
 # shellcheck source=/dev/null
@@ -174,13 +180,19 @@ install_buttons() {
 }
 remove_buttons() { unit_off raspy-buttons.service; }
 
-install_fan() {
-  say "Fan control + overheat protection"
+install_fan_udev() {   # Lüfter-Name (FAN_HWMON) steht in der Regel – nach Änderungen neu schreiben
   put "$DIR/system/99-fan-control.rules" /etc/udev/rules.d/99-fan-control.rules 644
   sudo udevadm control --reload-rules
   sudo udevadm trigger --subsystem-match=hwmon --action=add || true
-  # Kernel-Lüfterkurve bleibt als Notfall-Sicherung (greift erst ab 82 °C, falls der Dienst ausfällt)
-  sysedit block "$BOOT/config.txt" "raspy fan" <<'EOF'
+}
+
+install_fan() {
+  say "Overheat protection + fan control"
+  install_fan_udev
+  # Kernel-Lüfterkurve bleibt als Notfall-Sicherung (greift erst ab 82 °C, falls der Dienst ausfällt).
+  # Nur Pi 5: andere Modelle haben diese dtparams nicht.
+  if [ "$IS_PI5" = y ]; then
+    sysedit block "$BOOT/config.txt" "raspy fan" <<'EOF'
 [all]
 # Kernel-Lüfterkurve nur als NOTFALL-Sicherung – Normalbetrieb: device/thermal_guard.py (raspy-thermal.service)
 dtparam=fan_temp0=82000,fan_temp0_hyst=3000,fan_temp0_speed=200
@@ -188,16 +200,30 @@ dtparam=fan_temp1=84000,fan_temp1_hyst=3000,fan_temp1_speed=255
 dtparam=fan_temp2=86000,fan_temp2_hyst=3000,fan_temp2_speed=255
 dtparam=fan_temp3=88000,fan_temp3_hyst=3000,fan_temp3_speed=255
 EOF
+  fi
   put "$DIR/system/raspy-thermal.service" /etc/systemd/system/raspy-thermal.service 644
   install_sudoers
   unit_on raspy-thermal.service
   sudo systemctl restart raspy-thermal.service
-  ok "raspy-thermal.service (emergency shutdown at 85 °C, see device/thermal_guard.py)"
+  local crit; crit=$(setting THERMAL_CRIT)
+  ok "raspy-thermal.service (emergency shutdown at ${crit:-85} °C – change it: ./install.sh --configure → Temperature)"
+  if ! grep -qsx "$(fan_name)" /sys/class/hwmon/hwmon*/name; then
+    warn "No fan called '$(fan_name)' found – only the overheat protection runs (see docs/hardware.md)"
+  fi
 }
 remove_fan() {
   unit_off raspy-thermal.service
   sudo rm -f /etc/udev/rules.d/99-fan-control.rules
   if [ -f "$BOOT/config.txt" ]; then sysedit unblock "$BOOT/config.txt" "raspy fan"; fi
+}
+
+school_days() {   # SCREEN_ON_DAYS (Ziffern 1 = Mo … 7 = So) -> "Mon Tue …"
+  local d out="" n; d=$(setting SCREEN_ON_DAYS); d=${d:-12345}
+  [ "$d" = 12345 ] && { echo "Mon–Fri"; return; }
+  for n in 1 2 3 4 5 6 7; do
+    case "$d" in *"$n"*) out="$out $(echo "Mon Tue Wed Thu Fri Sat Sun" | cut -d' ' -f"$n")" ;; esac
+  done
+  echo "${out# }"
 }
 
 install_screen() {   # immer installiert; an/aus und Zeiten stehen in config.env (SCREEN_SCHEDULE …)
@@ -210,9 +236,14 @@ install_screen() {   # immer installiert; an/aus und Zeiten stehen in config.env
   local idle; idle=$(setting SCREEN_IDLE_OFF)
   case "$(setting SCREEN_SCHEDULE)" in
     0|no|false|off) ok "Screen always on (change with ./install.sh --configure)" ;;
-    *) ok "Mon–Fri $(setting SCREEN_ON_FROM)–$(setting SCREEN_ON_UNTIL) always on, otherwise off after $(( ${idle:-600} / 60 )) min idle" ;;
+    *) ok "$(school_days) $(setting SCREEN_ON_FROM)–$(setting SCREEN_ON_UNTIL) always on, otherwise off after $(( ${idle:-600} / 60 )) min idle" ;;
   esac
 }
+apply_display() {   # Auflösung/Drehung sofort anwenden (tut nichts, solange kein Desktop läuft)
+  local out; out=$(DISPLAY=:0 XAUTHORITY="$HOME/.Xauthority" "$DIR/device/display.sh" 2>&1 || true)
+  if [ -n "$out" ]; then ok "${out#display.sh: }"; fi
+}
+
 remove_screen() {
   { crontab -l 2>/dev/null | grep -v 'raspy:screen' || true; } | crontab -
   DISPLAY=:0 XAUTHORITY="$HOME/.Xauthority" xset dpms 600 600 600 2>/dev/null || true
@@ -333,6 +364,7 @@ remove_boot() {
 configure() {   # Menü, wenn config.env schon existiert, sonst Schritt für Schritt
   local flags=()
   [ "${F_BUTTONS:-n}" = y ] && flags+=(--buttons)
+  [ "${F_FAN:-n}" = y ] && flags+=(--fan)
   [ "${F_GUARD:-n}" = y ] && flags+=(--guard)
   "$DIR/venv/bin/python" "$DIR/app/configure.py" "${flags[@]}" "$@" </dev/tty
 }
@@ -374,7 +406,12 @@ if [ "${1:-}" = "--configure" ]; then
   [ "$(cksum < "$DIR/config.env" 2>/dev/null || true)" != "$before" ] || exit 0
   sudo systemctl restart raspy-web.service && ok "Web server restarted"
   if [ "${F_BUTTONS:-n}" = y ]; then sudo systemctl restart raspy-buttons.service || true; fi
+  if [ "${F_FAN:-n}" = y ]; then
+    install_fan_udev
+    sudo systemctl restart raspy-thermal.service || true
+  fi
   install_screen
+  apply_display
   if [ "${F_GUARD:-n}" = y ] && [ "${F_UPDATES:-n}" = y ]; then install_updates; fi   # GUARD_APT geändert?
   exit 0
 fi
@@ -389,7 +426,9 @@ echo "  Always installed: the web server and Chromium in full screen (kiosk)."
 def() { [ -n "$1" ] && echo "$1" || echo "$2"; }
 ask_yn "Two push buttons on GPIO (switch view / hold to shut down)?" "$(def "$F_BUTTONS" "$IS_PI")" && F_BUTTONS=y || F_BUTTONS=n
 if [ "$IS_PI5" = y ]; then
-  ask_yn "Smooth fan curve + overheat protection (Pi 5 Active Cooler)?" "$(def "$F_FAN" y)" && F_FAN=y || F_FAN=n
+  ask_yn "Overheat protection + smooth fan curve (Pi 5 Active Cooler)?" "$(def "$F_FAN" y)" && F_FAN=y || F_FAN=n
+elif [ "$IS_PI" = y ]; then
+  ask_yn "Overheat protection (safe shutdown when too hot; fan curve only with a PWM fan)?" "$(def "$F_FAN" n)" && F_FAN=y || F_FAN=n
 else
   F_FAN=n
 fi

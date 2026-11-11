@@ -9,7 +9,7 @@ UPTIME=$(cut -d. -f1 /proc/uptime)
 
 if [ "$UPTIME" -lt 180 ] && [ -f "$SPLASH" ]; then
   xsetroot -cursor /usr/local/share/raspy/blank.xbm /usr/local/share/raspy/blank.xbm 2>/dev/null || true
-  xdotool mousemove 1919 1079 2>/dev/null || true
+  xdotool mousemove 10000 10000 2>/dev/null || true   # X hält den Zeiger am Rand an – jede Auflösung
   rm -f /tmp/bootsplash_ready
   setsid /usr/bin/python3 "$SPLASH" > /tmp/bootsplash.log 2>&1 < /dev/null &
   # kurz warten, bis das Fenster steht – so blitzt der Desktop nie auf (max. 3 s)

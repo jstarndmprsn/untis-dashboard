@@ -1,10 +1,12 @@
 <!DOCTYPE html>
-<html lang="de" translate="no">
+<html lang="de" translate="no" data-margin="{{ display_margin }}" data-version="{{ page_version }}">
 <head>
 <meta charset="UTF-8">
 <meta name="google" content="notranslate">
 <title>Heute · lädt</title>
-<link rel="stylesheet" href="/static/heute.css?v=5">
+<link rel="stylesheet" href="/static/heute.css?v=6">
+<link rel="stylesheet" href="/static/fit.css?v=1">
+<script src="/static/fit.js?v=1"></script>
 </head>
 <body class="{{ '' if calendar else 'no-calendar' }}">
 <div class="bg"></div>
@@ -43,6 +45,6 @@
 
 <div id="status" class="status"></div>
 
-<script src="/static/heute.js?v=9"></script>
+<script src="/static/heute.js?v=10"></script>
 </body>
 </html>

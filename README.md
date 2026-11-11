@@ -24,14 +24,18 @@ The display itself is in German (that's where WebUntis is used most); setup and 
 - **Week view** (`/`) – the whole week; rows come from your school's own period times.
 - **Keeps working when the Wi-Fi drops** – shows the last known state with a "Stand HH:MM" hint.
 - **Screen schedule** – always on during school hours, off when idle otherwise (or simply always on).
+- **Fits your hardware** – the pages scale to any screen (720p to 4K, 16:10, 4:3, ultra-wide),
+  plus settings for resolution, rotation and TV overscan, button wiring and timing, temperature
+  limits and the fan curve. See [Adapting raspy to your hardware](docs/hardware.md).
 - Pi extras (all optional): **two hardware buttons** (switch view / hold to shut down),
-  **smooth fan curve + overheat protection** (Pi 5), **weekly auto-updates**
+  **overheat protection** with a **smooth fan curve** on a Pi 5, **weekly auto-updates**
   that are safe to interrupt (off by default), a **custom boot animation**, and a
   **software watchdog** that installs released versions by itself (see below).
 
 ## What you need
 
-- Raspberry Pi (tested on a **Pi 5, 4 GB** with the Active Cooler) and a 1920×1080 screen
+- Raspberry Pi (tested on a **Pi 5, 4 GB** with the Active Cooler) and any HDMI screen or TV –
+  the pages scale to its resolution (designed for 1920×1080; other setups: [hardware guide](docs/hardware.md))
 - **Raspberry Pi OS with desktop** (Debian 12 or 13), connected to the internet
 - A WebUntis login that can see your class timetable – ideally a separate account just for the display
 
@@ -47,7 +51,7 @@ cd untis-dashboard
 
 The installer asks a few questions and does the rest:
 
-1. **Which extras** you want (buttons, fan control, auto-updates, boot animation).
+1. **Which extras** you want (buttons, overheat protection/fan, auto-updates, boot animation).
 2. **Your school** – type its name and pick it from the list (same search as the Untis app),
    or paste the address of your WebUntis login page.
 3. **Username and password** – tested right away; the password is typed hidden.
@@ -69,14 +73,18 @@ raspy settings
    5  Calendar         on
    6  Weather          Musterstadt
    7  Screen schedule  Mon–Fri 07:30–16:00 on, otherwise off after 10 min idle
+   8  Display          resolution as set by the system
+   9  Buttons          tab = GPIO 17, power = GPIO 27
+  10  Temperature      shutdown above 85 °C, fan from 45 °C, full at 83 °C
 
    t  Test the settings
    s  Save and exit
    q  Quit without saving
 ```
 
-Nothing is written until you press `s`; then the web server is restarted and the screen schedule applied
-right away. `./install.sh --configure --wizard` walks through every step instead. To add or remove
+*Buttons* and *Temperature* appear when those extras are installed. Nothing is written until you
+press `s`; then everything is applied right away (web server, buttons, overheat protection, screen
+schedule, resolution/rotation). `./install.sh --configure --wizard` walks through every step instead. To add or remove
 extras (buttons, fan, updates, boot animation), run `./install.sh` again.
 
 To update: `git pull && ./install.sh`. What changed is in the [changelog](CHANGELOG.md).
@@ -110,21 +118,22 @@ calendar, so treat it like a password. Event colours come from keywords in the t
 
 So the screen isn't lit all night and weekend, raspy switches it off when nobody needs it:
 
-- **Mon–Fri during school hours** (default 07:30–16:00) the screen is always on.
+- **On school days during school hours** (default Mon–Fri 07:30–16:00) the screen is always on.
 - **At other times** it turns off after 10 minutes without a button press. Any button (or a keyboard/mouse) wakes it up.
 
-Change the times or turn the schedule off with `./install.sh --configure` → **Screen schedule**.
+Change the days and times or turn the schedule off with `./install.sh --configure` → **Screen schedule**.
 When it is off, the screen stays on all the time. The change takes effect immediately.
 
 ## Buttons
 
 Two push buttons, each between a GPIO pin and GND (internal pull-up, no resistors needed).
-Pins can be changed in `config.env`.
+Pins, wiring (to GND, to 3.3 V, or button/touch modules), hold times, and setups with only one
+button: `./install.sh --configure` → **Buttons**, details in the [hardware guide](docs/hardware.md#buttons).
 
 | Button | Wiring (default) | Press | Hold |
 |---|---|---|---|
 | Tab | GPIO 17 (pin 11) + GND (pin 9) | switch Today ⇄ Week | 3 s: close Chromium (shows desktop) |
-| Power | GPIO 27 (pin 13) + GND (pin 14) | wake the screen | countdown, then shut down |
+| Power | GPIO 27 (pin 13) + GND (pin 14) | wake the screen | 4 s: countdown, then shut down |
 | Both | | | 2 s: system/temperature dashboard |
 
 If system updates are running, holding Power first finishes the current package safely, then shuts down.
@@ -144,8 +153,13 @@ hand: `sudo systemctl restart raspy-web`.
 | `CALENDAR_ICS_URL` | optional iCal link; empty = no calendar column |
 | `WEATHER_LAT`, `WEATHER_LON` | optional; empty = no weather |
 | `SCREEN_SCHEDULE` | `1` = use the screen schedule below, `0` = screen always on |
-| `SCREEN_ON_FROM`, `SCREEN_ON_UNTIL`, `SCREEN_IDLE_OFF` | screen always on Mon–Fri in this window, otherwise off after N seconds idle |
-| `BUTTON_TAB_GPIO`, `BUTTON_POWER_GPIO`, `PORT` | hardware pins, web server port |
+| `SCREEN_ON_DAYS`, `SCREEN_ON_FROM`, `SCREEN_ON_UNTIL`, `SCREEN_IDLE_OFF` | screen always on on these days (`12345` = Mon–Fri) in this window, otherwise off after N seconds idle |
+| `DISPLAY_RESOLUTION`, `DISPLAY_ROTATE`, `DISPLAY_OUTPUT`, `DISPLAY_MARGIN`, `BROWSER_FLAGS` | screen: resolution, rotation, which HDMI port, margin against TV overscan, extra Chromium options |
+| `BUTTON_TAB_GPIO`, `BUTTON_POWER_GPIO`, `BUTTON_WIRING`, `BUTTON_*_HOLD`, `BUTTON_MIN_PRESS` | buttons: pins (empty = no button), wiring, hold times, noise filter |
+| `THERMAL_CRIT`, `THERMAL_ABORT`, `THERMAL_PANIC`, …, `FAN_CURVE`, `FAN_HWMON` | overheat protection limits, fan curve, which fan/sensor |
+| `PORT` | web server port |
+
+All hardware settings, with their defaults and examples: **[Adapting raspy to your hardware](docs/hardware.md)**.
 
 Subject colours are in `SUBJECT_COLORS` in `app/dashboard.py`; unknown subjects get a stable colour of their own.
 
@@ -159,6 +173,8 @@ venv/bin/python app/configure.py --check  # test login, class and calendar
 - **"Untis-Login abgelehnt"** – wrong username/password, or the account was locked; run `./install.sh --configure`.
   After a rejected login raspy only retries every 30 minutes, so it can't get the account locked.
 - **No homework / class duty** – not every school allows student accounts to see them; the rest still works.
+- **Page cut off at the edges, wrong resolution, upside down, buttons or fan don't react** – see the
+  [hardware guide](docs/hardware.md); `./install.sh --configure` → `t` lists settings that aren't valid.
 - **Screen stays black / desktop shows** – raspy needs the X11 desktop session. The installer offers
   to switch from Wayland; otherwise use `sudo raspi-config` → Advanced Options → Wayland → X11.
 - **Pages from another device**: by default the web server only listens on the Pi itself (the kiosk
@@ -221,7 +237,9 @@ app/          Flask server: server.py (app + week view page), week.py (week tabl
               (/heute + all Untis data), thermal.py (/thermal), untis.py (WebUntis client),
               configure.py (setup), demo.py, templates/, static/
 tests/        pytest suite (python -m pytest), runs in CI together with shellcheck
-device/       runs on the Pi: buttons, overlays, fan/overheat guard, boot splash, kiosk, screen schedule
+device/       runs on the Pi: buttons, overlays, fan/overheat guard, boot splash, kiosk, screen schedule,
+              display.sh (resolution/rotation)
+docs/         hardware.md (adapting raspy to your hardware), screenshots
 system/       systemd units and config templates used by install.sh
 guard/        software watchdog (raspy_guard.py – Python standard library only)
 boot/         boot animation generator (make_frames.py) and logo

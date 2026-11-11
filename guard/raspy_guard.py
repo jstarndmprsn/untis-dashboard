@@ -70,7 +70,8 @@ RESTART_RULES = {
     "raspy-buttons.service": (r"^device/button\.py$", r"^device/shutdown_overlay\.py$", r"^app/config\.py$"),
     "raspy-thermal.service": (r"^device/thermal_guard\.py$", r"^device/overheat_overlay\.py$", r"^app/config\.py$"),
 }
-NEXT_BOOT_PATTERNS = (r"^boot/", r"^device/bootsplash_x\.py$", r"^device/kiosk\.sh$", r"^system/raspy-display-setup$")
+NEXT_BOOT_PATTERNS = (r"^boot/", r"^device/bootsplash_x\.py$", r"^device/kiosk\.sh$", r"^device/display\.sh$",
+                      r"^system/raspy-display-setup$")
 VENV_IMPORTS = "import flask, waitress, requests, icalendar, recurring_ical_events, psutil"
 
 DAYS = {"mo": 0, "mon": 0, "di": 1, "tue": 1, "mi": 2, "wed": 2, "do": 3, "thu": 3,

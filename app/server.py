@@ -42,11 +42,14 @@ FAILED = """
                 </div>"""
 
 
-def asset_version():
-    """Kennung des ausgelieferten Stands: ändert sich mit jedem Update der Wochenansicht,
-    dann lädt der Browser die Seite einmal komplett neu (statt VERSION von Hand zu erhöhen)."""
-    h = hashlib.sha1()
-    for rel in ("week.py", "server.py", "templates/woche.html", "static/woche.css", "static/woche.js"):
+def asset_version(extra=""):
+    """Kennung des ausgelieferten Stands: ändert sich mit jedem Update der Seiten (oder mit `extra`,
+    z. B. geänderten Bildschirm-Einstellungen). Alle Seiten vergleichen sie mit dem Header X-Version
+    und laden dann einmal komplett neu (statt VERSION von Hand zu erhöhen)."""
+    h = hashlib.sha1(extra.encode())
+    files = ["week.py", "server.py"] + sorted(
+        os.path.join(d, n) for d in ("templates", "static") for n in os.listdir(os.path.join(APP_DIR, d)))
+    for rel in files:
         try:
             with open(os.path.join(APP_DIR, rel), "rb") as f:
                 h.update(f.read())
@@ -86,8 +89,19 @@ def create_app(cfg):
     # holt dashboard.py – beide Ansichten zeigen dieselben Daten
     master = untis.MasterData(cfg)
     dashboard.init(app, cfg, master)
-    thermal.init(app)                   # Thermal-Dashboard /thermal (beide Tasten 2 s halten)
-    version = asset_version()
+    thermal.init(app, cfg)              # Thermal-Dashboard /thermal (beide Tasten 2 s halten)
+    margin = f"{config.display_margin(cfg):g}"
+    version = asset_version(f"margin={margin}")
+
+    @app.context_processor
+    def page_settings():
+        # Rand in % für static/fit.js (Overscan bei Fernsehern) und Stand der Seiten, als <html data-…>
+        return {"display_margin": margin, "page_version": version}
+
+    @app.after_request
+    def version_header(resp):
+        resp.headers.setdefault("X-Version", version)
+        return resp
 
     @app.route("/content")
     def content():

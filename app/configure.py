@@ -7,13 +7,16 @@ and weather, screen schedule; tests everything and writes config.env.
                                           (step-by-step setup if there is no config.env yet)
     python3 app/configure.py --wizard     step-by-step through everything
     python3 app/configure.py --check      only test the current config.env
-    python3 app/configure.py --buttons    also offer the button GPIO pins
+    python3 app/configure.py --buttons    also offer the buttons (pins, wiring, hold times)
+    python3 app/configure.py --fan        also offer the overheat protection + fan curve
 
 install.sh runs this for you. Press Enter to keep the value shown in [brackets].
 """
 import argparse
 import getpass
 import os
+import re
+import subprocess
 import sys
 from datetime import date, datetime, timedelta
 from urllib.parse import parse_qs, urlparse
@@ -276,14 +279,70 @@ def idle_minutes(cfg):
     return str(max(1, int(v) // 60)) if v.isdigit() else "10"
 
 
+DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
+def parse_days(s):
+    """'Mo-Fr', 'Mon,Wed,Fri', 'täglich' or '12345' -> weekday digits '12345' (1 = Monday)."""
+    s = s.strip().lower()
+    if s and all(ch in "1234567" for ch in s):
+        return "".join(sorted(set(s)))
+    if s in ("täglich", "taeglich", "daily", "every day", "*", "alle"):
+        return "1234567"
+    names = guard_module().DAYS            # mo/mon … so/sun -> 0 … 6
+
+    def day(d):
+        k = d[:3] if d[:3] in names else d[:2]
+        if k not in names:
+            raise ValueError(f"Unknown weekday \"{d}\" – use Mo Di Mi Do Fr Sa So, Mon Tue …, or 1–7")
+        return names[k]
+    days = set()
+    s = re.sub(r"\s*[-–]\s*", "-", s)          # "Mo - Fr" -> "Mo-Fr"
+    for part in re.split(r"[,\s]+", s):
+        if not part:
+            continue
+        rng = re.fullmatch(r"(\w+)-(\w+)", part)
+        if rng:
+            a, b = day(rng.group(1)), day(rng.group(2))
+            days |= set(range(a, b + 1)) if a <= b else set(range(a, 7)) | set(range(0, b + 1))
+        else:
+            days.add(day(part))
+    if not days:
+        raise ValueError("Please name at least one day, e.g. Mo-Fr")
+    return "".join(str(d + 1) for d in sorted(days))
+
+
+def days_text(digits):
+    """'12345' -> 'Mon–Fri', '135' -> 'Mon, Wed, Fri', '1234567' -> 'every day'."""
+    d = sorted(int(x) - 1 for x in set(digits) if x in "1234567")
+    if len(d) == 7:
+        return "every day"
+    runs, out = [], []
+    for x in d:
+        if runs and x == runs[-1][-1] + 1:
+            runs[-1].append(x)
+        else:
+            runs.append([x])
+    for r in runs:
+        out += [f"{DAY_NAMES[r[0]]}–{DAY_NAMES[r[-1]]}"] if len(r) >= 3 else [DAY_NAMES[x] for x in r]
+    return ", ".join(out) or "no day"
+
+
 def step_screen(cfg):
-    print("  With the screen schedule the screen stays on Mon–Fri during school hours and turns off")
+    print("  With the screen schedule the screen stays on during school hours and turns off")
     print("  when idle at other times (any button wakes it up). Without it, the screen is always on.")
     if not yes("Use the screen schedule?", screen_on(cfg)):
         cfg["SCREEN_SCHEDULE"] = "0"
         ok("Screen stays on all the time")
         return
     cfg["SCREEN_SCHEDULE"] = "1"
+    while True:
+        v = ask("School days (e.g. Mo-Fr, Mo-Sa or Mon,Wed,Fri)", days_text(config.screen_days(cfg)))
+        try:
+            cfg["SCREEN_ON_DAYS"] = parse_days(v)
+            break
+        except ValueError as e:
+            err(str(e))
     for key, label in (("SCREEN_ON_FROM", "Always on from (HHMM)"), ("SCREEN_ON_UNTIL", "until (HHMM)")):
         while True:
             v = ask(label, cfg[key]).replace(":", "").replace(".", "").zfill(4)
@@ -347,10 +406,166 @@ def step_guard(cfg):
     ok(guard_summary(cfg))
 
 
+def ask_value(cfg, key, label, check, hint=""):
+    """Asks until check(value) returns None (= fine) or an error text. '-' = empty."""
+    while True:
+        v = input(f"  {label}{(' ' + c('2', hint)) if hint else ''} [{cfg[key] or '–'}]: ").strip()
+        v = cfg[key] if v == "" else ("" if v == "-" else v)
+        problem = check(v)
+        if problem is None:
+            cfg[key] = v
+            return v
+        err(problem)
+
+
+def number_check(key, unit=""):
+    lo, hi = config.LIMITS[key]
+
+    def check(v):
+        n = config._num(v)
+        return None if n is not None and lo <= n <= hi else f"Please enter a number from {lo:g} to {hi:g}{unit}"
+    return check
+
+
+def ask_number(cfg, key, label, unit=""):
+    v = ask_value(cfg, key, label, number_check(key, unit))
+    cfg[key] = f"{config._num(v):g}"
+
+
+WIRINGS = [
+    ("gnd", "button between the GPIO pin and GND (internal pull-up) – the usual way"),
+    ("3v3", "button between the GPIO pin and 3.3 V (internal pull-down)"),
+    ("active-low", "module with its own resistor that pulls the pin LOW when pressed"),
+    ("active-high", "module that drives the pin HIGH when pressed (e.g. TTP223 touch sensor)"),
+]
+
+
+def gpio_check(other_key, cfg):
+    def check(v):
+        if v == "":
+            return None
+        if not (v.isdigit() and 0 <= int(v) <= 27):
+            return "Please enter a BCM GPIO number from 0 to 27 (or - for no button)"
+        if v == str(cfg[other_key]).strip():
+            return f"GPIO {v} is already used by the other button"
+        return None
+    return check
+
+
 def step_buttons(cfg):
-    print("  Two push buttons between a GPIO pin and GND (internal pull-up).")
-    cfg["BUTTON_TAB_GPIO"] = ask("GPIO of the tab button (switch view)", cfg["BUTTON_TAB_GPIO"])
-    cfg["BUTTON_POWER_GPIO"] = ask("GPIO of the power button (hold to shut down)", cfg["BUTTON_POWER_GPIO"])
+    print("  Pins are BCM GPIO numbers (GPIO 17 = pin 11, GPIO 27 = pin 13). '-' = no such button.")
+    ask_value(cfg, "BUTTON_TAB_GPIO", "GPIO of the tab button (switch view)",
+              gpio_check("BUTTON_POWER_GPIO", cfg))
+    ask_value(cfg, "BUTTON_POWER_GPIO", "GPIO of the power button (hold to shut down)",
+              gpio_check("BUTTON_TAB_GPIO", cfg))
+    if not cfg["BUTTON_TAB_GPIO"] and not cfg["BUTTON_POWER_GPIO"]:
+        warn("No button configured – remove the buttons extra with ./install.sh if you have none")
+    print("  How are the buttons wired?")
+    cur = config.button_wiring(cfg) if cfg["BUTTON_WIRING"] in config.BUTTON_WIRINGS else "gnd"
+    for i, (key, text) in enumerate(WIRINGS, 1):
+        print(f"    {i}) {key:<12} {text}" + (c("2", "  (current)") if key == cur else ""))
+    while True:
+        v = input("  Wiring [Enter = keep]: ").strip().lower()
+        if not v:
+            cfg["BUTTON_WIRING"] = cur
+            break
+        hit = next((k for i, (k, _) in enumerate(WIRINGS, 1) if v in (str(i), k)), None)
+        if hit:
+            cfg["BUTTON_WIRING"] = hit
+            break
+        err("Please choose 1–4")
+    if cfg["BUTTON_POWER_GPIO"]:
+        ask_number(cfg, "BUTTON_POWER_HOLD", "Hold the power button this many seconds to shut down", " s")
+    if cfg["BUTTON_TAB_GPIO"]:
+        ask_number(cfg, "BUTTON_TAB_HOLD", "Hold the tab button this many seconds to close the browser", " s")
+    if cfg["BUTTON_TAB_GPIO"] and cfg["BUTTON_POWER_GPIO"]:
+        ask_number(cfg, "BUTTON_COMBO_HOLD", "Hold both this many seconds for the system dashboard", " s")
+    ok(buttons_summary(cfg))
+
+
+def buttons_summary(cfg):
+    pins = []
+    for key, name in (("BUTTON_TAB_GPIO", "tab"), ("BUTTON_POWER_GPIO", "power")):
+        if str(cfg[key]).strip():
+            pins.append(f"{name} = GPIO {cfg[key]}")
+    wiring = cfg["BUTTON_WIRING"] if cfg["BUTTON_WIRING"] in config.BUTTON_WIRINGS else "gnd"
+    return (", ".join(pins) or "no buttons") + ("" if wiring == "gnd" else f" ({wiring})")
+
+
+def display_list():
+    """Connected outputs and their resolutions from xrandr (empty if no desktop is running)."""
+    script = os.path.join(config.ROOT, "device", "display.sh")
+    env = {**os.environ, "DISPLAY": os.environ.get("DISPLAY", ":0")}
+    env.setdefault("XAUTHORITY", os.path.expanduser("~/.Xauthority"))
+    try:
+        out = subprocess.run(["sh", script, "--list"], capture_output=True, text=True, timeout=10, env=env).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return out if out.startswith("Output ") else ""
+
+
+def step_display(cfg):
+    print("  The pages are drawn for 1920×1080 and scaled to fit any screen automatically.")
+    print("  Here you only need to change what your screen doesn't do by itself.")
+    modes = display_list()
+    if modes:
+        print(c("2", "\n".join("  " + ln for ln in modes.rstrip().splitlines()[:24])))
+        if modes.count("Output ") > 1 or cfg["DISPLAY_OUTPUT"]:
+            ask_value(cfg, "DISPLAY_OUTPUT", "Output", lambda v: None, "(e.g. HDMI-1; - = first connected)")
+    ask_value(cfg, "DISPLAY_RESOLUTION", "Resolution",
+              lambda v: None if not v or config.valid_resolution(v) else "Like 1920x1080 or 1280x720@60",
+              "(e.g. 1920x1080 on a slow 4K TV; - = system default)")
+    ask_value(cfg, "DISPLAY_ROTATE", "Rotation in degrees clockwise",
+              lambda v: None if v in ("",) + config.ROTATIONS else "0, 90, 180 or 270",
+              "(180 = mounted upside down; - = system default)")
+    ask_number(cfg, "DISPLAY_MARGIN", "Margin around the page in %", " %")
+    if config.number(cfg, "DISPLAY_MARGIN", warn=False) == 0:
+        print("  " + c("2", "Tip: a TV that cuts off the edges (overscan) needs a margin of about 2–5 %."))
+    ok(display_summary(cfg))
+
+
+def display_summary(cfg):
+    parts = [cfg["DISPLAY_RESOLUTION"] or "resolution as set by the system"]
+    if cfg["DISPLAY_ROTATE"] not in ("", "0"):
+        parts.append(f"rotated {cfg['DISPLAY_ROTATE']}°")
+    if cfg["DISPLAY_OUTPUT"]:
+        parts.append(f"on {cfg['DISPLAY_OUTPUT']}")
+    margin = config.number(cfg, "DISPLAY_MARGIN", warn=False)
+    if margin:
+        parts.append(f"margin {margin:g} %")
+    return ", ".join(parts)
+
+
+def step_temperature(cfg):
+    print("  The overheat protection shows a warning with a countdown and shuts the Pi down safely")
+    print("  when it stays too hot. The defaults suit a Raspberry Pi 5 (it slows itself down from 85 °C).")
+    ask_number(cfg, "THERMAL_CRIT", "Emergency shutdown when hotter than (°C)", " °C")
+    ask_number(cfg, "THERMAL_CRIT_SECONDS", "… for this many seconds", " s")
+    ask_number(cfg, "THERMAL_PANIC", "Start the countdown right away from (°C)", " °C")
+    ask_number(cfg, "THERMAL_ABORT", "Cancel the countdown when it cools below (°C)", " °C")
+    ask_number(cfg, "THERMAL_COUNTDOWN", "Countdown before shutting down (seconds)", " s")
+    ask_number(cfg, "THERMAL_WARN", "Show as 'warm' in the system dashboard from (°C)", " °C")
+    t = {k: config._num(cfg[k]) for k in ("THERMAL_ABORT", "THERMAL_CRIT", "THERMAL_PANIC")}
+    if not t["THERMAL_ABORT"] < t["THERMAL_CRIT"] <= t["THERMAL_PANIC"]:
+        warn("Cancel < shutdown ≤ right away doesn't hold – the defaults are used until you fix it")
+    print("  Fan curve: temperature:speed pairs, speed 0–255 (Pi 5 Active Cooler, or another PWM fan –")
+    print("  see FAN_HWMON in docs/hardware.md). In between, the speed is interpolated.")
+
+    def curve_check(v):
+        try:
+            config.parse_fan_curve(v)
+        except ValueError as e:
+            return str(e)
+        return None
+    ask_value(cfg, "FAN_CURVE", "Fan curve", curve_check)
+    ok(temperature_summary(cfg))
+
+
+def temperature_summary(cfg):
+    t = config.thermal_limits(cfg, warn=False)
+    curve = config.fan_curve(cfg, warn=False)
+    return (f"shutdown above {t['THERMAL_CRIT']:g} °C, fan from {curve[0][0]:g} °C, "
+            f"full at {curve[-1][0]:g} °C")
 
 
 # ───────────────────────── writing ─────────────────────────
@@ -365,14 +580,32 @@ SECTIONS = [
     ("Weather (optional, Open-Meteo, no API key)", ["WEATHER_LAT", "WEATHER_LON", "WEATHER_PLACE"],
      "Empty = no weather."),
     ("Screen schedule (device/screen_schedule.sh)",
-     ["SCREEN_SCHEDULE", "SCREEN_ON_FROM", "SCREEN_ON_UNTIL", "SCREEN_IDLE_OFF"],
-     "SCREEN_SCHEDULE=1: Mon–Fri between FROM and UNTIL (HHMM) the screen stays on; otherwise off after\n"
-     "IDLE_OFF seconds without a button press. SCREEN_SCHEDULE=0: the screen is always on."),
+     ["SCREEN_SCHEDULE", "SCREEN_ON_DAYS", "SCREEN_ON_FROM", "SCREEN_ON_UNTIL", "SCREEN_IDLE_OFF"],
+     "SCREEN_SCHEDULE=1: on ON_DAYS (1 = Mon … 7 = Sun) between FROM and UNTIL (HHMM) the screen stays on;\n"
+     "otherwise off after IDLE_OFF seconds without a button press. SCREEN_SCHEDULE=0: the screen is always on."),
+    ("Display (see docs/hardware.md)",
+     ["DISPLAY_OUTPUT", "DISPLAY_RESOLUTION", "DISPLAY_ROTATE", "DISPLAY_MARGIN", "BROWSER_FLAGS"],
+     "The pages scale to any screen by themselves. Empty = leave it as the system has it.\n"
+     "OUTPUT e.g. HDMI-1 (empty = first connected), RESOLUTION e.g. 1920x1080 or 1280x720@60,\n"
+     "ROTATE 0/90/180/270 degrees clockwise, MARGIN in % against overscan on TVs (0–20),\n"
+     "BROWSER_FLAGS extra Chromium options, e.g. --disable-gpu."),
+    ("Buttons (only with the buttons extra, see docs/hardware.md)",
+     ["BUTTON_TAB_GPIO", "BUTTON_POWER_GPIO", "BUTTON_WIRING", "BUTTON_TAB_HOLD", "BUTTON_POWER_HOLD",
+      "BUTTON_COMBO_HOLD", "BUTTON_MIN_PRESS"],
+     "BCM GPIO numbers (empty = no such button). WIRING: gnd (button to GND), 3v3 (button to 3.3 V),\n"
+     "active-low / active-high (modules with their own resistor). Times in seconds; MIN_PRESS: shorter\n"
+     "presses are ignored as noise (raise it with long cables)."),
+    ("Overheat protection + fan (only with that extra, see docs/hardware.md)",
+     ["THERMAL_SENSOR", "THERMAL_WARN", "THERMAL_CRIT", "THERMAL_CRIT_SECONDS", "THERMAL_PANIC",
+      "THERMAL_ABORT", "THERMAL_COUNTDOWN", "FAN_CURVE", "FAN_HWMON", "FAN_MAX_RPM"],
+     "Shutdown countdown after CRIT °C for CRIT_SECONDS (right away from PANIC), cancelled below ABORT.\n"
+     "FAN_CURVE: °C:PWM pairs (PWM 0–255). FAN_HWMON: name of the fan in /sys/class/hwmon/*/name\n"
+     "(Pi 5 Active Cooler: pwmfan). FAN_MAX_RPM: scale of the speed chart in the system dashboard."),
     ("Software watchdog (only with the watchdog extra)", ["GUARD_WINDOWS", "GUARD_APT"],
      "GUARD_WINDOWS: when released versions may be installed, e.g. \"Di,Do 11:35-11:50; Mo-Fr 16:15-18:00\"\n"
      "(empty = only with: sudo raspy-guard update-now). GUARD_APT=1: system updates in the same windows."),
-    ("Hardware", ["BUTTON_TAB_GPIO", "BUTTON_POWER_GPIO", "PORT", "LAN_ACCESS", "STATUS_FILE"],
-     "BCM GPIO numbers; PORT of the web server.\n"
+    ("Web server", ["PORT", "LAN_ACCESS", "STATUS_FILE"],
+     "PORT of the web server.\n"
      "LAN_ACCESS=1: pages also reachable from other devices (no login – only on a network you trust).\n"
      "STATUS_FILE: optional file another program writes a short notice into (JSON {\"message\": …,\n"
      "\"updated\": unix time} or plain text); shown in the status line of /heute while it is fresh."),
@@ -433,7 +666,12 @@ def check(cfg):
     else:
         ok("No calendar (two-column layout)")
     ok(f"Weather: {cfg['WEATHER_PLACE'] or 'on'}" if cfg["WEATHER_LAT"] else "No weather")
-    return good
+    bad = config.problems(cfg)
+    for p in bad:
+        err(f"Hardware setting {p} – the default is used instead")
+    if not bad:
+        ok("Hardware settings (display, buttons, temperature) look fine")
+    return good and not bad
 
 
 def untis_time(v):
@@ -489,11 +727,11 @@ def screen_summary(cfg):
     if not screen_on(cfg):
         return "off – screen always on"
     t = lambda v: f"{v[:2]}:{v[2:]}" if hhmm_ok(v) else v  # noqa: E731
-    return (f"Mon–Fri {t(cfg['SCREEN_ON_FROM'])}–{t(cfg['SCREEN_ON_UNTIL'])} on, "
+    return (f"{days_text(config.screen_days(cfg))} {t(cfg['SCREEN_ON_FROM'])}–{t(cfg['SCREEN_ON_UNTIL'])} on, "
             f"otherwise off after {idle_minutes(cfg)} min idle")
 
 
-def menu_items(buttons, guard=False):
+def menu_items(buttons, guard=False, fan=False):
     dim = lambda s: c("2", s)  # noqa: E731
     items = [
         ("School", lambda g: f"{g['UNTIS_SCHOOL']} on {g['UNTIS_SERVER']}"
@@ -507,24 +745,26 @@ def menu_items(buttons, guard=False):
         ("Weather", lambda g: (g["WEATHER_PLACE"] or f"{g['WEATHER_LAT']}, {g['WEATHER_LON']}")
          if g["WEATHER_LAT"] else dim("off"), step_weather),
         ("Screen schedule", screen_summary, step_screen),
+        ("Display", display_summary, step_display),
     ]
     if buttons:
-        items.append(("Buttons", lambda g: f"tab = GPIO {g['BUTTON_TAB_GPIO']}, power = GPIO {g['BUTTON_POWER_GPIO']}",
-                      step_buttons))
+        items.append(("Buttons", buttons_summary, step_buttons))
+    if fan:
+        items.append(("Temperature", temperature_summary, step_temperature))
     if guard:
         items.append(("Watchdog", guard_summary, step_guard))
     return items
 
 
-def menu(cfg, buttons, guard=False):
+def menu(cfg, buttons, guard=False, fan=False):
     """Pick only what you want to change; saves at the end. Returns True if something was saved."""
-    items = menu_items(buttons, guard)
+    items = menu_items(buttons, guard, fan)
     saved = dict(cfg)
     while True:
         dirty = cfg != saved
         heading("raspy settings" + (c("33", "  – unsaved changes") if dirty else ""))
         for i, (title, show, _) in enumerate(items, 1):
-            print(f"   {i}  {title:<16} {show(cfg)}")
+            print(f"  {i:>2}  {title:<16} {show(cfg)}")
         print()
         print("   t  Test the settings")
         print("   s  Save and exit" if dirty else c("2", "   s  Save and exit (nothing changed)"))
@@ -562,7 +802,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--check", action="store_true", help="only test the current config.env")
     ap.add_argument("--wizard", action="store_true", help="step by step through everything instead of the menu")
-    ap.add_argument("--buttons", action="store_true", help="also offer the button GPIO pins")
+    ap.add_argument("--buttons", action="store_true", help="also offer the buttons (pins, wiring, hold times)")
+    ap.add_argument("--fan", action="store_true", help="also offer the overheat protection + fan curve")
     ap.add_argument("--guard", action="store_true", help="also offer the software watchdog's time windows")
     a = ap.parse_args()
 
@@ -573,7 +814,7 @@ def main():
     print(bold("raspy setup") + f" – {config.CONFIG_FILE}")
     try:
         if cfg["_exists"] and not a.wizard:
-            menu(cfg, a.buttons, a.guard)
+            menu(cfg, a.buttons, a.guard, a.fan)
             return
         wizard(cfg, a.buttons, a.guard)
     except (KeyboardInterrupt, EOFError):

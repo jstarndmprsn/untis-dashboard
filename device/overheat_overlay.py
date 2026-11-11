@@ -12,11 +12,17 @@ kann keine echte Transparenz).
 """
 import io
 import math
+import os
 import sys
 import time
 import tkinter as tk
 
 from PIL import Image, ImageFilter, ImageGrab
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app"))
+import config  # noqa: E402
+
+SENSOR = config.load()["THERMAL_SENSOR"] or config.DEFAULTS["THERMAL_SENSOR"]
 
 END_AT = float(sys.argv[1]) if len(sys.argv) > 1 else time.time() + 20
 FAKE = sys.argv[2] if len(sys.argv) > 2 else None
@@ -31,7 +37,7 @@ FONT = "Inter"
 
 def read_temp():
     try:
-        with open(FAKE or "/sys/class/thermal/thermal_zone0/temp") as f:
+        with open(FAKE or SENSOR) as f:
             v = float(f.read().strip())
         return v if FAKE else v / 1000
     except (OSError, ValueError):
@@ -63,20 +69,28 @@ def main():
     c.create_image(0, 0, anchor="nw", image=bg)
 
     cx, cy = sw // 2, sh // 2
-    # Warnsymbol (Dreieck mit Ausrufezeichen)
-    s = 70
-    c.create_polygon(cx, cy - 330 - s, cx - s * 1.15, cy - 330 + s * 0.85, cx + s * 1.15, cy - 330 + s * 0.85,
-                     outline=RED, width=7, fill="", joinstyle="round")
-    c.create_line(cx, cy - 330 - s * 0.35, cx, cy - 330 + s * 0.3, fill=RED, width=9, capstyle="round")
-    c.create_oval(cx - 6, cy - 330 + s * 0.52, cx + 6, cy - 330 + s * 0.64, fill=RED, outline=RED)
+    k = min(sw / 1920, sh / 1080)       # Maße unten sind für 1920×1080 -> auf den Bildschirm skalieren
 
-    c.create_text(cx, cy - 170, text="Überhitzung", font=(FONT, 64, "bold"), fill=TEXT)
-    c.create_text(cx, cy - 90, text="Der Raspberry Pi wird zum Schutz heruntergefahren",
-                  font=(FONT, 30), fill=SUB)
-    num = c.create_text(cx, cy + 60, text="", font=(FONT, 150, "bold"), fill=TEXT)
-    temp = c.create_text(cx, cy + 190, text="", font=(FONT, 30), fill=SUB)
-    c.create_text(cx, cy + 260, text="Wird automatisch abgebrochen, wenn er rechtzeitig abkühlt.",
-                  font=(FONT, 22), fill=SUB)
+    def px(v):
+        return v * k
+
+    def font(size, *style):
+        return (FONT, max(8, round(size * k)), *style)
+
+    # Warnsymbol (Dreieck mit Ausrufezeichen)
+    s, ty = px(70), cy - px(330)
+    c.create_polygon(cx, ty - s, cx - s * 1.15, ty + s * 0.85, cx + s * 1.15, ty + s * 0.85,
+                     outline=RED, width=max(2, px(7)), fill="", joinstyle="round")
+    c.create_line(cx, ty - s * 0.35, cx, ty + s * 0.3, fill=RED, width=max(2, px(9)), capstyle="round")
+    c.create_oval(cx - px(6), ty + s * 0.52, cx + px(6), ty + s * 0.64, fill=RED, outline=RED)
+
+    c.create_text(cx, cy - px(170), text="Überhitzung", font=font(64, "bold"), fill=TEXT)
+    c.create_text(cx, cy - px(90), text="Der Raspberry Pi wird zum Schutz heruntergefahren",
+                  font=font(30), fill=SUB)
+    num = c.create_text(cx, cy + px(60), text="", font=font(150, "bold"), fill=TEXT)
+    temp = c.create_text(cx, cy + px(190), text="", font=font(30), fill=SUB)
+    c.create_text(cx, cy + px(260), text="Wird automatisch abgebrochen, wenn er rechtzeitig abkühlt.",
+                  font=font(22), fill=SUB)
 
     root.lift()
     root.attributes("-topmost", True)

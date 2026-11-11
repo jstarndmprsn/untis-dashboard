@@ -1,2 +1,3 @@
-# Lüfter (Pi 5 Active Cooler): nur der Display-Benutzer darf PWM setzen (thermal_guard.py)
-SUBSYSTEM=="hwmon", ACTION=="add", ATTR{name}=="pwmfan", RUN+="/bin/chown @USER@ /sys%p/pwm1 /sys%p/pwm1_enable"
+# Lüfter (Standard: Pi 5 Active Cooler, Name aus FAN_HWMON in config.env): nur der Display-Benutzer
+# darf PWM setzen (thermal_guard.py)
+SUBSYSTEM=="hwmon", ACTION=="add", ATTR{name}=="@FAN_HWMON@", RUN+="/bin/chown @USER@ /sys%p/pwm1 /sys%p/pwm1_enable"

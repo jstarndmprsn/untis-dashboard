@@ -56,13 +56,26 @@ else:
 FONT_REG = "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
 FONT_FAMILY = "Noto Sans"
 
-TRACK_W, TRACK_H = 760, 150   # Größe des Sliders in Bildschirm-Pixeln
+TRACK_W, TRACK_H = 760, 150   # Größe des Sliders bei 1920×1080 (main() skaliert auf den Bildschirm)
 KNOB_W = 250
 PAD = 9
 SS = 3                        # Supersampling für glatte Kanten
 FPS = 40
 
-_number_font = ImageFont.truetype(FONT_REG, int((TRACK_H - 2 * PAD) * 0.62 * SS))
+_number_font = None
+
+
+def scale_to_screen(sw, sh):
+    """Slider-Maße auf die Bildschirmgröße umrechnen (entworfen für 1920×1080); gibt den Faktor zurück."""
+    global TRACK_W, TRACK_H, KNOB_W, PAD, _number_font
+    k = min(sw / 1920, sh / 1080)
+    TRACK_W, TRACK_H, KNOB_W = round(760 * k), round(150 * k), round(250 * k)
+    PAD = max(2, round(9 * k))
+    try:
+        _number_font = ImageFont.truetype(FONT_REG, int((TRACK_H - 2 * PAD) * 0.62 * SS))
+    except OSError:
+        _number_font = ImageFont.load_default()
+    return k
 
 
 def make_background(w, h):
@@ -130,11 +143,12 @@ def main():
     state = {"shown": False, "done": False, "last": None, "bg": None, "slider": None}
 
     cx, cy = sw // 2, sh // 2
-    title = canvas.create_text(cx, cy - 170, text=TITLE,
-                               font=(FONT_FAMILY, 46), fill=TEXT)
+    k = scale_to_screen(sw, sh)
+    title = canvas.create_text(cx, cy - 170 * k, text=TITLE,
+                               font=(FONT_FAMILY, max(8, round(46 * k))), fill=TEXT)
     slider_item = canvas.create_image(cx, cy, anchor="center")
-    hint = canvas.create_text(cx, cy + 150, text=HINT,
-                              font=(FONT_FAMILY, 22), fill=SUBTEXT)
+    hint = canvas.create_text(cx, cy + 150 * k, text=HINT,
+                              font=(FONT_FAMILY, max(8, round(22 * k))), fill=SUBTEXT)
 
     def set_slider(progress, number):
         img = tk.PhotoImage(data=render_slider(progress, number))

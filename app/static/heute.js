@@ -215,6 +215,9 @@ async function refresh() {
   try {
     const r = await fetch("/api/heute" + location.search, { cache: "no-store" });
     if (!r.ok) throw new Error(r.status);
+    // neuer Stand auf dem Server (Update, geänderte Bildschirm-Einstellungen) -> einmal neu laden
+    const v = r.headers.get("X-Version");
+    if (v && v !== document.documentElement.dataset.version) { location.reload(); return; }
     const txt = await r.text();
     lastFetchOk = Date.now();
     if (txt !== lastJson) {

@@ -1,6 +1,9 @@
 """
-Zwei Tasten an GPIO (interner Pull-up, gedrückt = GND), läuft als raspy-buttons.service.
-Pins in config.env: BUTTON_TAB_GPIO (Standard 17 = Pin 11), BUTTON_POWER_GPIO (27 = Pin 13).
+Zwei Tasten an GPIO, läuft als raspy-buttons.service. Alles in config.env (siehe docs/hardware.md):
+  BUTTON_TAB_GPIO / BUTTON_POWER_GPIO   BCM-Nummern (Standard 17 = Pin 11, 27 = Pin 13; leer = Taste fehlt)
+  BUTTON_WIRING                         gnd (Standard: Taste nach GND, interner Pull-up) | 3v3 |
+                                        active-low | active-high (Module mit eigenem Widerstand)
+  BUTTON_TAB_HOLD, BUTTON_POWER_HOLD, BUTTON_COMBO_HOLD, BUTTON_MIN_PRESS   Zeiten in Sekunden
 
   Tab-Taste kurz           Tab wechseln (Heute <-> Wochenplan)
   Tab-Taste 3 s            Chromium beenden (Desktop wird sichtbar)
@@ -12,6 +15,7 @@ import os
 os.environ['GPIOZERO_PIN_FACTORY'] = 'lgpio'
 
 from gpiozero import Button
+import shlex
 import shutil
 import subprocess
 import time
@@ -25,33 +29,56 @@ import config  # noqa: E402
 CFG = config.load()
 sys.stdout.reconfigure(line_buffering=True)
 
+# Verdrahtung -> gpiozero: (pull_up, active_state)
+WIRING = {
+    'gnd':         (True, None),    # Taste zwischen GPIO und GND, interner Pull-up (Standard)
+    '3v3':         (False, None),   # Taste zwischen GPIO und 3,3 V, interner Pull-down
+    'active-low':  (None, False),   # Modul/eigener Widerstand: gedrückt = LOW
+    'active-high': (None, True),    # Modul/eigener Widerstand: gedrückt = HIGH (z. B. Touch-Sensor TTP223)
+}
+
+
+class NoButton:
+    """Platzhalter, wenn eine Taste nicht angeschlossen ist (GPIO in config.env leer)."""
+    is_pressed = False
+
+
+def make_button(key, **kw):
+    pin = config.gpio(CFG, key)
+    if pin is None:
+        print(f"{key} leer → keine Taste", flush=True)
+        return NoButton()
+    pull_up, active_state = WIRING[config.button_wiring(CFG)]
+    return Button(pin, pull_up=pull_up, active_state=active_state, **kw)
+
+
 time.sleep(15)
 
-button1 = Button(int(CFG['BUTTON_TAB_GPIO']), pull_up=True, bounce_time=0.1)
-button2 = Button(int(CFG['BUTTON_POWER_GPIO']), pull_up=True)
+button1 = make_button('BUTTON_TAB_GPIO', bounce_time=0.1)
+button2 = make_button('BUTTON_POWER_GPIO')
 
 time.sleep(2)
 
 DISPLAY_ENV  = {**os.environ, 'DISPLAY': ':0', 'XAUTHORITY': os.path.expanduser('~/.Xauthority')}
 CHROMIUM     = shutil.which('chromium') or shutil.which('chromium-browser') or 'chromium'
 
-NOISE_TIME     = 0.05   # kürzer = Rauschen
+NOISE_TIME     = config.number(CFG, 'BUTTON_MIN_PRESS')   # kürzer = Rauschen
 
 # ── Button 1 (Tab-Taste) ──
-KILL_TIME      = 3.0    # so lange halten -> pkill chromium
+KILL_TIME      = config.number(CFG, 'BUTTON_TAB_HOLD')    # so lange halten -> pkill chromium
 
 # ── Button 2 (Aus-Taste) ──
 OVERLAY_SCRIPT = os.path.join(HERE, 'shutdown_overlay.py')
 PREPARE_TIME   = 0.3    # ab hier Overlay-Prozess vorbereiten (filtert Rauschen, Tk braucht Startzeit)
 HOLD_TIME      = 1.0    # ab hier ist das Overlay sichtbar
-COUNTDOWN      = 3.0    # danach (also nach 4 s Halten) wird ausgeschaltet
+COUNTDOWN      = config.number(CFG, 'BUTTON_POWER_HOLD') - HOLD_TIME   # danach wird ausgeschaltet
 
 # ── Laufende System-Updates (raspy-update.service, dienstags 09:45) ──
 UPDATE_STATE     = '/run/raspy-update/state'   # existiert, solange Updates laufen
-UPDATE_COUNTDOWN = 5.0  # so lange (nach dem Einblenden) halten, um trotzdem auszuschalten
+UPDATE_COUNTDOWN = max(5.0, COUNTDOWN)  # so lange (nach dem Einblenden) halten, um trotzdem auszuschalten
 
 # ── Beide Tasten -> Thermal-Dashboard ──
-COMBO_TIME     = 2.0    # beide so lange halten
+COMBO_TIME     = config.number(CFG, 'BUTTON_COMBO_HOLD')  # beide so lange halten
 THERMAL_URL    = f"http://127.0.0.1:{CFG['PORT']}/thermal"
 THERMAL_PROFILE = os.path.expanduser('~/.config/chromium-thermal')   # eigenes Profil = eigenes Fenster
 THERMAL_MAX_OPEN = 600  # nach 10 min automatisch schließen
@@ -115,7 +142,7 @@ def thermal_open():
     subprocess.Popen(
         [CHROMIUM, '--kiosk', f'--app={THERMAL_URL}', f'--user-data-dir={THERMAL_PROFILE}',
          '--no-first-run', '--noerrdialogs', '--disable-session-crashed-bubble',
-         '--disable-features=Translate'],
+         '--disable-features=Translate', *shlex.split(CFG['BROWSER_FLAGS'])],
         env=DISPLAY_ENV, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 def thermal_close():
@@ -179,7 +206,7 @@ def button_loop():
 
         # ── Button 1 allein ──
         if p1 and not combo and mode1 is None and t1 and now - t1 >= KILL_TIME:
-            print("Button 1 3s gehalten → pkill chromium", flush=True)
+            print(f"Button 1 {KILL_TIME:g}s gehalten → pkill chromium", flush=True)
             subprocess.Popen(['pkill', 'chromium'])
             thermal_since = None
             mode1 = 'done'
@@ -247,7 +274,8 @@ def button_loop():
         time.sleep(0.01)
 
 if __name__ == "__main__":
-    print("Buttons aktiv...", flush=True)
+    print(f"Buttons aktiv (Verdrahtung {config.button_wiring(CFG)}, Tab {KILL_TIME:g} s, "
+          f"Aus {HOLD_TIME + COUNTDOWN:g} s, beide {COMBO_TIME:g} s)...", flush=True)
     # Schleife im Hauptprogramm: stürzt sie ab, endet der Prozess mit Fehler und systemd startet
     # den Dienst neu (in einem Hintergrund-Thread wäre die Aus-Taste sonst still tot).
     try:

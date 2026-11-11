@@ -1,0 +1,12 @@
+/* Seite als "Leinwand" in Design-Pixeln (mindestens 1920×1080), per fit.js auf den Bildschirm skaliert.
+   Muss nach dem Seiten-CSS geladen werden. position: fixed in der Seite bezieht sich danach auf diese
+   Leinwand (wegen transform) – genau richtig für Hintergrund und Statuszeile. */
+html {
+  width: 100vw; height: 100vh; overflow: hidden;
+}
+body {
+  position: absolute; left: var(--fit-x, 0); top: var(--fit-y, 0);
+  width: var(--fit-w, 1920px); height: var(--fit-h, 1080px);
+  transform: scale(var(--fit-s, 1)); transform-origin: 0 0;
+  overflow: hidden; margin: 0;
+}

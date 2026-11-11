@@ -1,6 +1,7 @@
-/* Wochenansicht (/) – 1920×1080, Design wie seit V.1.x */
+/* Wochenansicht (/) – Design-Pixel 1920×1080 (fit.js skaliert auf jeden Bildschirm), Design wie seit V.1.x */
 body { margin: 0; font-family: Arial, Helvetica, sans-serif; background: #111; color: #fff; }
-table { width: 100vw; height: 100vh; border-collapse: separate; border-spacing: 10px; table-layout: fixed; }
+#content { height: 100%; }
+table { width: 100%; height: 100%; border-collapse: separate; border-spacing: 10px; table-layout: fixed; }
 th { background: #222; font-size: 1.5em; color: #fff; border: 1px solid #333; padding: 3px; text-align: center; border-radius: 3px; }
 th:first-child { width: 120px; font-size: 1.2em; }
 th.today { color: rgb(255, 96, 54); }
@@ -11,7 +12,7 @@ td .subject { font-weight: bold; display: block; }
 td .info { font-size: 0.95em; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 td .note { color: #bbb; }
 .empty { background: #111; border: none; }
-.error { display: flex; align-items: center; justify-content: center; height: 100vh; font-size: 2.5em; font-weight: bold; color: #ff3333; }
+.error { display: flex; align-items: center; justify-content: center; height: 100%; font-size: 2.5em; font-weight: bold; color: #ff3333; }
 
 /* Vertretungs-Styles */
 td.substitution { border-color: #4caf50 !important; }
@@ -34,7 +35,7 @@ td.event { border-color: #00bcd4 !important; }
 td.multi::before { background: var(--stripe-gradient, var(--stripe-color)) !important; }
 
 /* Fullscreen Version Display */
-#version-screen { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #111; color: #fff; align-items: center; justify-content: center; font-size: 5em; font-weight: bold; z-index: 9999; }
+#version-screen { display: none; position: fixed; inset: 0; background: #111; color: #fff; align-items: center; justify-content: center; font-size: 5em; font-weight: bold; z-index: 9999; }
 
 td.normal::before { background: var(--stripe-color); }
 table.compact td { padding-top: 4px; padding-bottom: 4px; }

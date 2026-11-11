@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### Added – settings for your hardware ([guide](docs/hardware.md))
+
+- **The pages fit any screen.** Today view, week view and system dashboard used to be fixed at
+  1920×1080, so on a 720p screen half the page was cut off. They now scale to any resolution and use
+  the extra room on 16:10, 4:3 or ultra-wide screens. The shutdown and overheat warnings scale too.
+- **Display settings** (`./install.sh --configure` → *Display*): resolution (e.g. 1080p on a slow 4K TV),
+  rotation (`180` for a screen mounted upside down), which HDMI port, a margin against TV overscan,
+  and extra Chromium options (`BROWSER_FLAGS`, e.g. `--disable-gpu`). Empty values leave the system's
+  own screen settings alone.
+- **Buttons** (*Buttons* in the menu): wiring to GND (as before), to 3.3 V, or button/touch modules
+  (`BUTTON_WIRING`); hold times for shutdown, closing the browser and the system dashboard; a noise
+  filter for long cables; and setups with only one button (leave the other pin empty).
+- **Temperature** (*Temperature* in the menu, with the overheat protection extra): shutdown limits, the
+  countdown, the fan curve, and which fan and sensor to use (`FAN_HWMON`, `THERMAL_SENSOR`). The system
+  dashboard uses the same limits.
+- **Overheat protection on every Pi**, not just the Pi 5. The smooth fan curve still needs a PWM fan
+  such as the Pi 5's Active Cooler. Without one, the dashboard says "no fan found" instead of a warning.
+- **Screen schedule on any weekdays** (`SCREEN_ON_DAYS`, e.g. Mon–Sat), not only Mon–Fri.
+- `./install.sh --configure` → `t` lists hardware values that aren't valid. Each service logs a warning
+  and uses the default for such a value instead of failing.
+- The today view and the system dashboard reload by themselves after an update or a changed display
+  setting, as the week view already did.
+
+### Fixed
+
+- The overheat protection said "smooth fan curve" even when no fan was found.
+
 ### Added – software watchdog (opt-in extra in `./install.sh`)
 
 - **Installs released versions automatically, only in your time windows.** Tag a release
