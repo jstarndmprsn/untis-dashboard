@@ -1,3 +1,4 @@
+import re
 from datetime import date, datetime
 
 import requests
@@ -119,3 +120,49 @@ def test_read_notice_json_text_stale_and_missing(tmp_path):
     f.write_text('[1, 2]')
     assert dashboard.read_notice(str(f)) is None
 
+
+
+# ------------------ Terminfarben (CALENDAR_COLORS) ------------------
+SAMPLE_TITLES = ["Geburtstag Lena", "Mathearbeit", "Vokabeltest Englisch", "Lektion 4 lernen", "Herbstferien",
+                 "Unterrichtsfrei", "Klassenfahrt", "Schulkonzert", "Elternabend", "Freitag Treffen", "PRÄSENTATION"]
+
+
+def _old_color(title):
+    """So hat calendar_color vor CALENDAR_COLORS gerechnet (Referenz für bestehende Installationen)."""
+    t = title.lower()
+    for pattern, color in dashboard.CALENDAR_COLOR_RULES:
+        if re.search(pattern, t):
+            return color
+    return dashboard.CALENDAR_DEFAULT_COLOR
+
+
+def test_empty_calendar_colors_keeps_builtin_rules():
+    for setting in ("", "   "):
+        f = dashboard.CalendarFetcher("demo", setting)
+        for t in SAMPLE_TITLES:
+            assert f.color(t) == _old_color(t), t
+
+
+def test_builtin_rules_as_text_give_same_colors():
+    f = dashboard.CalendarFetcher("demo", dashboard.default_color_rules_text())
+    for t in SAMPLE_TITLES:
+        assert f.color(t) == _old_color(t), t
+
+
+def test_custom_calendar_colors():
+    rules, default, problems = dashboard.parse_color_rules(
+        "geburtstag=#f00; arbeit|test=#00ff00\n*=#123456; kaputt; farbe=rot; a(b=#abc")
+    assert default == "#123456"
+    assert len(problems) == 2                       # "kaputt" und "farbe=rot"
+    f = dashboard.CalendarFetcher("demo", "geburtstag=#f00; arbeit|test=#00ff00; *=#123456; a(b=#abc")
+    assert f.color("GEBURTSTAG Tim") == "#f00"
+    assert f.color("Mathe-Test") == "#00ff00"
+    assert f.color("Ausflug") == "#123456"          # alte Regel gilt nicht mehr, nur die eigenen
+    assert f.color("xa(bx") == "#abc"               # ungültiger Ausdruck -> wörtlich
+
+
+def test_calendar_colors_reject_css_injection():
+    _, _, problems = dashboard.parse_color_rules("x=#fff;background:url(evil)")
+    assert problems
+    f = dashboard.CalendarFetcher("demo", "x=red; *=#fff")
+    assert f.color("x") == "#fff"

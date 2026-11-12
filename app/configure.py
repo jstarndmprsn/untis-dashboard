@@ -232,6 +232,45 @@ def step_calendar(cfg):
                 return
 
 
+def colors_summary(cfg):
+    import dashboard
+    if not cfg["CALENDAR_COLORS"].strip():
+        return "built-in"
+    rules, _, problems = dashboard.parse_color_rules(cfg["CALENDAR_COLORS"])
+    n = f"{len(rules)} rule" + ("" if len(rules) == 1 else "s")
+    return f"custom ({n}" + (f", {len(problems)} invalid" if problems else "") + ")"
+
+
+def step_colors(cfg):
+    import dashboard
+    print("  Calendar events are coloured by words in their title (the first matching rule wins).")
+    print("  Format: words=#colour; words=#colour; *=#colour   (words separated by |, * = all other events)")
+    print("  " + c("2", "Example: arbeit|test|klausur=#6ee07a; ferien=#5ac8fa; *=#d8d8e0"))
+    cur = cfg["CALENDAR_COLORS"].strip()
+    rules, default, _ = dashboard.parse_color_rules(cur)
+    print(f"  Current rules ({'custom' if cur else 'built-in'}):")
+    for pattern, color in rules:
+        print(f"    {color}  {pattern}")
+    print(f"    {default}  * (everything else)")
+    hint = "Enter = keep, - = back to built-in" if cur else "Enter = keep built-in"
+    while True:
+        v = input(f"  New rules ({hint}): ").strip()
+        if not v:
+            return
+        if v == "-":
+            cfg["CALENDAR_COLORS"] = ""
+            ok("Built-in colours")
+            return
+        rules, _, problems = dashboard.parse_color_rules(v)
+        for p in problems:
+            err(f"Invalid: {p}")
+        if problems and not yes("Save anyway (invalid entries are ignored)?", False):
+            continue
+        cfg["CALENDAR_COLORS"] = v
+        ok(f"Saved {len(rules)} colour rule" + ("" if len(rules) == 1 else "s"))
+        return
+
+
 def step_weather(cfg):
     if cfg["WEATHER_LAT"]:
         print(f"  Current: {cfg['WEATHER_PLACE'] or (cfg['WEATHER_LAT'] + ', ' + cfg['WEATHER_LON'])}")
@@ -360,8 +399,10 @@ SECTIONS = [
      "UNTIS_CLASS is the class name; its ID is looked up automatically (IDs change every school year).\n"
      "UNTIS_CLASS_ID only if you need to force a fixed ID. DUTY_LABEL = class duty shown on /heute\n"
      "(as named in Untis; empty = hide)."),
-    ("Calendar (optional)", ["CALENDAR_ICS_URL"],
-     "Secret iCal address (Google/iCloud/Outlook). Empty = two-column layout without calendar."),
+    ("Calendar (optional)", ["CALENDAR_ICS_URL", "CALENDAR_COLORS"],
+     "Secret iCal address (Google/iCloud/Outlook). Empty = two-column layout without calendar.\n"
+     "CALENDAR_COLORS: event colours by words in the title, e.g. \"geburtstag=#ff6b6b; ferien|frei=#5ac8fa;\n"
+     "*=#d8d8e0\" (words separated by |, * = all other events). Empty = built-in rules."),
     ("Weather (optional, Open-Meteo, no API key)", ["WEATHER_LAT", "WEATHER_LON", "WEATHER_PLACE"],
      "Empty = no weather."),
     ("Screen schedule (device/screen_schedule.sh)",
@@ -504,6 +545,7 @@ def menu_items(buttons, guard=False):
          do_class),
         ("Class duty", lambda g: g["DUTY_LABEL"] or dim("hidden"), step_duty),
         ("Calendar", lambda g: "on" if g["CALENDAR_ICS_URL"] else dim("off"), step_calendar),
+        ("Event colours", colors_summary, step_colors),
         ("Weather", lambda g: (g["WEATHER_PLACE"] or f"{g['WEATHER_LAT']}, {g['WEATHER_LON']}")
          if g["WEATHER_LAT"] else dim("off"), step_weather),
         ("Screen schedule", screen_summary, step_screen),

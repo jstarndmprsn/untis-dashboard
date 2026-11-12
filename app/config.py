@@ -18,6 +18,7 @@ DEFAULTS = {
     "UNTIS_CLASS_ID": "",        # optional: feste Klassen-ID statt Name
     "DUTY_LABEL": "Klassenordner",
     "CALENDAR_ICS_URL": "",      # optional: geheime iCal-Adresse (Google, iCloud, Outlook …)
+    "CALENDAR_COLORS": "",       # Terminfarben nach Stichwort, z. B. "geburtstag=#ff6b6b; *=#d8d8e0" (leer = eingebaut)
     "WEATHER_LAT": "",           # optional: leer = kein Wetter
     "WEATHER_LON": "",
     "WEATHER_PLACE": "",
@@ -29,9 +30,9 @@ DEFAULTS = {
     "BUTTON_POWER_GPIO": "27",
     "PORT": "5000",
     "LAN_ACCESS": "0",           # 1 = Webserver auch von anderen Geräten im Netz erreichbar
-    "STATUS_FILE": "",
+    "STATUS_FILE": "",           # optional: Hinweis eines anderen Programms in der Statuszeile von /heute
     "GUARD_WINDOWS": "",         # Software-Wächter: Zeitfenster für Updates, z. B. "Di,Do 11:35-11:50; Mo-Fr 16:15-18:00"
-    "GUARD_APT": "0",            # 1 = auch die System-Updates (apt) in diese Zeitfenster legen           # optional: Hinweis eines anderen Programms in der Statuszeile von /heute
+    "GUARD_APT": "0",            # 1 = auch die System-Updates (apt) in diese Zeitfenster legen
     "DEMO": "0",                 # 1 = erfundene Beispieldaten statt Untis (zum Ausprobieren)
 }
 

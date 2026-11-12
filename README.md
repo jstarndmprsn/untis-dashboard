@@ -103,8 +103,16 @@ Then open <http://localhost:5000/heute> and <http://localhost:5000/>. Add
 **Google Calendar** (on a computer): Settings → pick the calendar under "Settings for my calendars" →
 *Integrate calendar* → **Secret address in iCal format**. Anyone with this link can read the
 calendar, so treat it like a password. Event colours come from keywords in the title
-(*Arbeit/Test/Klausur* green, *Ferien* blue, *Geburtstag* red, *Ausflug/Konzert* yellow; see
-`CALENDAR_COLOR_RULES` in `app/dashboard.py`).
+(built in: *Arbeit/Test/Klausur* green, *Ferien* blue, *Geburtstag* red, *Ausflug/Konzert* yellow).
+Change them with `./install.sh --configure` → **Event colours**, or in `config.env`:
+
+```
+CALENDAR_COLORS="geburtstag=#ff6b6b; arbeit|test|klausur=#6ee07a; ferien|frei=#5ac8fa; *=#d8d8e0"
+```
+
+Rules are checked in order, the first match wins; words are separated by `|` (regular expressions
+work, upper/lower case doesn't matter) and `*` is the colour for everything else. Leave it empty
+to keep the built-in rules.
 
 ## Screen schedule
 
@@ -142,6 +150,7 @@ hand: `sudo systemctl restart raspy-web`.
 | `UNTIS_CLASS` | class name, e.g. `7a` – the ID is looked up automatically each school year |
 | `DUTY_LABEL` | class duty to show (as named in Untis, default `Klassenordner`; empty = hide) |
 | `CALENDAR_ICS_URL` | optional iCal link; empty = no calendar column |
+| `CALENDAR_COLORS` | event colours by keyword (see [above](#getting-a-calendar-link)); empty = built-in rules |
 | `WEATHER_LAT`, `WEATHER_LON` | optional; empty = no weather |
 | `SCREEN_SCHEDULE` | `1` = use the screen schedule below, `0` = screen always on |
 | `SCREEN_ON_FROM`, `SCREEN_ON_UNTIL`, `SCREEN_IDLE_OFF` | screen always on Mon–Fri in this window, otherwise off after N seconds idle |

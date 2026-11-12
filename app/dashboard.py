@@ -53,7 +53,8 @@ SUBJECT_COLORS = {
     "Kun": "#bc38f0", "Mus": "#af5bf3", "Spo": "#2d96db",
 }
 
-# Google liefert im iCal-Export keine Terminfarben -> Farbe per Stichwort
+# Google liefert im iCal-Export keine Terminfarben -> Farbe per Stichwort.
+# Eingebaute Regeln; CALENDAR_COLORS in config.env ersetzt sie (leer = diese hier).
 CALENDAR_COLOR_RULES = [
     (r"geburtstag", "#ff6b6b"),
     (r"arbeit|test|klausur|vokabel|lek(tion)?\b|präsentation|referat", "#6ee07a"),
@@ -358,21 +359,67 @@ class UntisFetcher:
 
 
 # ------------------ KALENDER ------------------
-def calendar_color(title):
+_HEX_COLOR = re.compile(r"#(?:[0-9a-fA-F]{3}){1,2}")
+
+
+def default_color_rules_text():
+    """Die eingebauten Regeln im Format von CALENDAR_COLORS (Vorlage fürs Setup)."""
+    return "; ".join([f"{p}={c}" for p, c in CALENDAR_COLOR_RULES] + [f"*={CALENDAR_DEFAULT_COLOR}"])
+
+
+def parse_color_rules(text):
+    """CALENDAR_COLORS -> (regeln, standardfarbe, probleme).
+
+    Format: "wort|wort=#farbe; …; *=#farbe" – Einträge durch ; oder Zeilenumbruch getrennt,
+    Stichwörter durch | (reguläre Ausdrücke erlaubt, Groß/klein egal), * = alle anderen Termine.
+    Leer = eingebaute Regeln, damit bestehende Installationen genauso aussehen wie vorher.
+    Fehlerhafte Einträge werden übersprungen (und gemeldet), der Rest gilt."""
+    if not (text or "").strip():
+        return list(CALENDAR_COLOR_RULES), CALENDAR_DEFAULT_COLOR, []
+    rules, default, problems = [], CALENDAR_DEFAULT_COLOR, []
+    for item in re.split(r"[;\n]", text):
+        item = item.strip()
+        if not item:
+            continue
+        pattern, sep, color = item.rpartition("=")
+        pattern, color = pattern.strip(), color.strip()
+        if not sep or not pattern or not _HEX_COLOR.fullmatch(color):
+            problems.append(f"„{item}“ (erwartet: wörter=#rrggbb)")
+            continue
+        if pattern == "*":
+            default = color
+            continue
+        try:
+            re.compile(pattern)
+        except re.error:
+            pattern = re.escape(pattern)   # kein gültiger Ausdruck -> wörtlich suchen
+        rules.append((pattern, color))
+    return rules, default, problems
+
+
+def calendar_color(title, rules=None, default=None):
+    if rules is None:
+        rules, default = CALENDAR_COLOR_RULES, CALENDAR_DEFAULT_COLOR
     t = title.lower()
-    for pattern, color in CALENDAR_COLOR_RULES:
-        if re.search(pattern, t):
+    for pattern, color in rules:
+        if re.search(pattern, t, re.IGNORECASE):
             return color
-    return CALENDAR_DEFAULT_COLOR
+    return default or CALENDAR_DEFAULT_COLOR
 
 
 class CalendarFetcher:
-    def __init__(self, url):
+    def __init__(self, url, colors=""):
         self.url = url
+        self.rules, self.default, problems = parse_color_rules(colors)
+        for p in problems:
+            print(f"[kalender] CALENDAR_COLORS: ungültiger Eintrag übersprungen: {p}", flush=True)
+
+    def color(self, title):
+        return calendar_color(title, self.rules, self.default)
 
     def __call__(self):
         if self.url == "demo":
-            events = [{**e, "color": calendar_color(e["title"])} for e in demo.calendar_events()]
+            events = [{**e, "color": self.color(e["title"])} for e in demo.calendar_events()]
             return events
         # webcal:// ist dasselbe wie https:// (so liefern iCloud & Co. ihre Links)
         url = "https://" + self.url[len("webcal://"):] if self.url.startswith("webcal://") else self.url
@@ -398,7 +445,7 @@ class CalendarFetcher:
             events.append({
                 "title": title,
                 "start": first.isoformat(), "end": last.isoformat(),
-                "time": time_str, "color": calendar_color(title),
+                "time": time_str, "color": self.color(title),
             })
         events.sort(key=lambda e: (e["start"], e["time"] or ""))
         return events
@@ -588,7 +635,8 @@ def init(app, cfg, master):
     _notice["path"] = (cfg.get("STATUS_FILE") or "").strip()
     # Kalender und Wetter sind optional: ohne Eintrag in config.env gibt es die Quelle nicht
     if cfg["CALENDAR_ICS_URL"].strip():
-        _sources["calendar"] = Source("Kalender", CALENDAR_INTERVAL, CalendarFetcher(cfg["CALENDAR_ICS_URL"].strip()))
+        fetch = CalendarFetcher(cfg["CALENDAR_ICS_URL"].strip(), cfg["CALENDAR_COLORS"])
+        _sources["calendar"] = Source("Kalender", CALENDAR_INTERVAL, fetch)
     if cfg["WEATHER_LAT"].strip() and cfg["WEATHER_LON"].strip():
         _sources["weather"] = Source("Wetter", WEATHER_INTERVAL,
                                      WeatherFetcher(cfg["WEATHER_LAT"].strip(), cfg["WEATHER_LON"].strip()))

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added – calendar colours in the settings
+
+- **Event colours can be changed** in `./install.sh --configure` → *Event colours* or with
+  `CALENDAR_COLORS` in `config.env` (e.g. `"geburtstag=#ff6b6b; ferien|frei=#5ac8fa; *=#d8d8e0"`).
+  Existing installations keep their colours: empty means the same built-in rules as before.
+  Invalid entries are skipped and logged; the rest still applies.
+
 ### Added – software watchdog (opt-in extra in `./install.sh`)
 
 - **Installs released versions automatically, only in your time windows.** Tag a release
