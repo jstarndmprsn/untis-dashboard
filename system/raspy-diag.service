@@ -1,0 +1,29 @@
+[Unit]
+Description=raspy – Diagnose-Protokoll (nur auf dem Gerät, sendet nichts)
+After=multi-user.target
+
+[Service]
+# root: Kernel-Meldungen (SD-Karte, Dateisystem) lesen und vcgencmd nutzen
+ExecStart=/usr/bin/python3 @DIR@/diag/raspy_diag.py run
+Restart=always
+RestartSec=10
+Nice=10
+StandardOutput=journal
+StandardError=journal
+# Kein Netzwerk: der Dienst kann keine Internet-/Netzwerk-Verbindung öffnen (nur lokale Unix-Sockets
+# für journalctl/systemctl). Das Protokoll kann das Gerät so gar nicht verlassen.
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+# Schreiben nur ins eigene Protokoll, alles andere nur lesen
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/raspy-diag
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

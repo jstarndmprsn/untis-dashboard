@@ -1,0 +1,5 @@
+#!/bin/sh
+# raspy-diag – Diagnose-Protokoll ansehen (nur auf diesem Pi, nichts wird verschickt)
+#   raspy-diag            Überblick        raspy-diag check    jetzt alles prüfen
+#   raspy-diag log        alle Einträge    raspy-diag export   Bericht als Textdatei
+exec python3 @DIR@/diag/raspy_diag.py "$@"

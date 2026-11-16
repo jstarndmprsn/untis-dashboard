@@ -26,8 +26,9 @@ The display itself is in German (that's where WebUntis is used most); setup and 
 - **Screen schedule** – always on during school hours, off when idle otherwise (or simply always on).
 - Pi extras (all optional): **two hardware buttons** (switch view / hold to shut down),
   **smooth fan curve + overheat protection** (Pi 5), **weekly auto-updates**
-  that are safe to interrupt (off by default), a **custom boot animation**, and a
-  **software watchdog** that installs released versions by itself (see below).
+  that are safe to interrupt (off by default), a **custom boot animation**, a
+  **software watchdog** that installs released versions by itself, and a **diagnostics log**
+  that stays on the Pi (see below).
 
 ## What you need
 
@@ -47,7 +48,7 @@ cd untis-dashboard
 
 The installer asks a few questions and does the rest:
 
-1. **Which extras** you want (buttons, fan control, auto-updates, boot animation).
+1. **Which extras** you want (buttons, fan control, auto-updates, boot animation, watchdog, diagnostics).
 2. **Your school** – type its name and pick it from the list (same search as the Untis app),
    or paste the address of your WebUntis login page.
 3. **Username and password** – tested right away; the password is typed hidden.
@@ -77,7 +78,7 @@ raspy settings
 
 Nothing is written until you press `s`; then the web server is restarted and the screen schedule applied
 right away. `./install.sh --configure --wizard` walks through every step instead. To add or remove
-extras (buttons, fan, updates, boot animation), run `./install.sh` again.
+extras (buttons, fan, updates, boot animation, watchdog, diagnostics), run `./install.sh` again.
 
 To update: `git pull && ./install.sh`. What changed is in the [changelog](CHANGELOG.md).
 
@@ -163,6 +164,7 @@ Subject colours are in `SUBJECT_COLORS` in `app/dashboard.py`; unknown subjects 
 ```bash
 journalctl -u raspy-web -f                # web server / Untis errors
 venv/bin/python app/configure.py --check  # test login, class and calendar
+raspy-diag check                          # with the diagnostics extra: check network, Untis, power, SD card …
 ```
 
 - **"Untis-Login abgelehnt"** – wrong username/password, or the account was locked; run `./install.sh --configure`.
@@ -223,6 +225,46 @@ With the watchdog, everything runs from `releases/<version>` – change settings
 `./install.sh --configure` as before (it uses the active version). It can't fix a dying SD card:
 that's what backups are for.
 
+## Diagnostics log (optional)
+
+Problems on a classroom display are often intermittent – the Wi-Fi drops every morning at 7:50,
+the power supply is too weak, someone pulls the plug at night – and by the time someone looks,
+they're gone (Raspberry Pi OS may keep the system journal only in RAM, so it's lost on every reboot).
+The diagnostics extra keeps a small log of such problems **on the Pi itself**. Turn it on with
+`./install.sh` (*Diagnostics log?* → yes); it is off by default.
+
+```bash
+raspy-diag                # overview: open problems, what happened in the last 7 days (and when), tips
+raspy-diag log --days 30  # every entry
+raspy-diag check          # check everything right now
+raspy-diag export         # save a cleaned-up report as a text file (to a USB stick, if one is plugged in)
+sudo raspy-diag clear     # delete the log
+```
+
+What it records – only when something changes, so the SD card isn't worn down:
+network down/back (and weak Wi-Fi signal), Untis/calendar/weather unreachable (with the reason:
+DNS, proxy, timeout, certificate …) or login rejected, under-voltage and throttling, overheating,
+SD card / file system errors and out-of-memory from the kernel log, crashed services, the kiosk
+browser not running, a hanging web server, low disk space, unsynchronised clock, and whether the
+Pi was shut down properly or lost power (with the time of the last sign of life).
+
+**Privacy:**
+
+- **Nothing leaves the Pi.** The service runs with no network access at all (systemd
+  `RestrictAddressFamilies=AF_UNIX`, `IPAddressDeny=any`) – there is no telemetry and no upload.
+  `raspy-diag check`, when you run it, only does a DNS lookup and a TLS handshake with your
+  WebUntis server (the one the display polls anyway).
+- The log holds times, problem types and short error messages – no passwords, usernames,
+  school name, calendar link, student names or timetable content (they are filtered out before
+  writing). It lives in `/var/lib/raspy-diag` (at most ~1 MB, oldest entries drop out), readable
+  only by root and your user.
+- `raspy-diag export` additionally removes your username, the Pi's name and public IP addresses.
+  The report stays where you saved it – share it only if you want to (read it first).
+- Turning the extra off again (`./install.sh` → no) or `./install.sh --uninstall` deletes the log.
+
+The web server writes the state of its data sources to `/run/raspy/sources.json` (RAM only) –
+that's how the diagnostics know about Untis without going online themselves.
+
 ## Project layout
 
 ```
@@ -233,6 +275,7 @@ tests/        pytest suite (python -m pytest), runs in CI together with shellche
 device/       runs on the Pi: buttons, overlays, fan/overheat guard, boot splash, kiosk, screen schedule
 system/       systemd units and config templates used by install.sh
 guard/        software watchdog (raspy_guard.py – Python standard library only)
+diag/         diagnostics log (raspy_diag.py – Python standard library only)
 boot/         boot animation generator (make_frames.py) and logo
 ```
 

@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Added – diagnostics log (opt-in extra in `./install.sh`, off by default)
+
+- **Keeps a small log of problems on the Pi itself** – Wi-Fi drops, Untis/calendar/weather
+  unreachable (with the reason), login rejected, under-voltage and throttling, overheating,
+  SD card and file system errors, crashed services, kiosk browser gone, low disk space,
+  unsynchronised clock, and power loss without shutdown (with the last sign of life).
+  Only changes are written (a few KB per week), so the SD card isn't worn down.
+- `raspy-diag` shows open problems, what happened in the last 7 days and at which time of day it
+  usually happens, with tips; `raspy-diag check` checks everything right now; `raspy-diag export`
+  saves a cleaned-up text report (to a USB stick if one is plugged in); `sudo raspy-diag clear`
+  deletes the log.
+- **Nothing is sent anywhere:** the service has no network access (enforced by systemd). Passwords,
+  usernames, school, calendar link and coordinates are filtered out before anything is written.
+  Turning the extra off deletes the log.
+- Python standard library only, so it keeps working when the Python environment is broken.
+  The web server now writes the state of its data sources to `/run/raspy/sources.json` (RAM).
+
 ### Added – calendar colours in the settings
 
 - **Event colours can be changed** in `./install.sh --configure` → *Event colours* or with

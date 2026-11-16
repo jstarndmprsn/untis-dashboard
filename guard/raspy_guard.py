@@ -69,6 +69,7 @@ RESTART_RULES = {
     "raspy-web.service": (r"^app/",),
     "raspy-buttons.service": (r"^device/button\.py$", r"^device/shutdown_overlay\.py$", r"^app/config\.py$"),
     "raspy-thermal.service": (r"^device/thermal_guard\.py$", r"^device/overheat_overlay\.py$", r"^app/config\.py$"),
+    "raspy-diag.service": (r"^diag/",),
 }
 NEXT_BOOT_PATTERNS = (r"^boot/", r"^device/bootsplash_x\.py$", r"^device/kiosk\.sh$", r"^system/raspy-display-setup$")
 VENV_IMPORTS = "import flask, waitress, requests, icalendar, recurring_ical_events, psutil"
@@ -421,7 +422,7 @@ class Guard:
         """Probelauf der neuen Version mit Demo-Daten auf einem freien Port (ohne echte Zugangsdaten)."""
         root = os.path.join(self.releases, name)
         py = os.path.join(root, "venv", "bin", "python")
-        self.run([py, "-m", "compileall", "-q", "app", "device", "guard"], cwd=root, timeout=300)
+        self.run([py, "-m", "compileall", "-q", "app", "device", "guard", "diag"], cwd=root, timeout=300)
         if os.path.exists(os.path.join(root, "install.sh")):
             self.run(["bash", "-n", "install.sh"], cwd=root)
         with socket.socket() as s:
