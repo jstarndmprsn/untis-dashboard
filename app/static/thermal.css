@@ -90,3 +90,37 @@ svg .ref-label { font-size: 14px; }
 .note.good .ic { color: var(--good); }
 .note.warn .ic { color: var(--warn); } .note.warn { color: var(--text); }
 .note.crit .ic { color: var(--crit); } .note.crit { color: var(--crit); font-weight: 600; }
+
+/* Diagnose-Panel (nur mit dem Diagnose-Extra) */
+.diag { display: flex; flex-direction: column; gap: 8px; }
+.diag .p-title { margin-bottom: 4px; }
+#diag { display: flex; flex-direction: column; gap: 8px; font-size: 19px; color: var(--muted); }
+.d-row { display: grid; grid-template-columns: 20px 1fr auto; gap: 10px; align-items: baseline; color: var(--text); line-height: 1.3; }
+.d-row .ic { text-align: center; }
+.d-row.good .ic { color: var(--good); } .d-row.good { color: var(--muted); }
+.d-row.warn .ic { color: var(--warn); }
+.d-row.crit .ic, .d-row.crit .d-msg { color: var(--crit); } .d-row.crit .d-msg { font-weight: 600; }
+.d-row.info .ic { color: var(--faint); }
+.d-meta { color: var(--faint); font-size: 17px; white-space: nowrap; }
+.d-msg { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.d-head { font-size: 16px; text-transform: uppercase; letter-spacing: 1px; color: var(--faint); margin-top: 6px; }
+.d-sum { display: grid; grid-template-columns: 44px 1fr; gap: 8px; align-items: baseline; line-height: 1.3; }
+.d-sum b { color: var(--warn); font-weight: 600; text-align: right; }
+.d-sum em { display: block; font-style: normal; font-size: 17px; color: var(--faint); }
+.d-sum .d-msg { -webkit-line-clamp: 3; color: var(--text); }
+.d-none { color: var(--good); }
+.d-tip { font-size: 18px; color: var(--text); background: rgba(138, 180, 255, .1); border-radius: 12px; padding: 8px 12px;
+         line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.d-log { display: grid; grid-template-columns: 82px 1fr; gap: 8px; font-size: 17px; line-height: 1.3; }
+.d-log span:first-child { color: var(--faint); white-space: nowrap; }
+.d-log .d-msg { -webkit-line-clamp: 1; }
+
+/* mit Diagnose: das Panel bekommt den Platz von Kernen und Prozessen (CPU-Kachel und -Kurve bleiben),
+   "Schutz & Hinweise" bleibt immer ganz zu sehen. Reicht der Platz nicht, fallen unten die ältesten
+   Einträge weg (ausgeblendet statt abgeschnitten). */
+.panel[hidden] { display: none; }
+.with-diag .side > .panel:not(.diag):not(.hints) { display: none; }
+.with-diag .diag { flex: 1; min-height: 0; overflow: hidden; }
+.with-diag .hints { flex: none; }
+.with-diag .notes { gap: 6px; font-size: 18px; }
+.d-log.cut { display: none; }

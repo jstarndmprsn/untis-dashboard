@@ -114,6 +114,24 @@ ADVICE = {
              "schlagen HTTPS-Verbindungen fehl und die Tagesansicht zeigt den falschen Tag.",
 }
 
+# Kurze Namen je Problemart (Überblick "Letzte 7 Tage" im Terminal und auf dem Bildschirm)
+KIND_LABELS = {
+    "unclean": "Strom weg oder eingefroren (ohne Herunterfahren)",
+    "net": "Netz weg", "wifi_weak": "WLAN-Signal schwach",
+    "src:untis": "Untis nicht erreichbar", "src:calendar": "Kalender nicht erreichbar",
+    "src:weather": "Wetter nicht erreichbar", "auth": "Untis-Login abgelehnt",
+    "undervolt": "Unterspannung", "throttled": "CPU gedrosselt", "templimit": "Temperaturlimit erreicht",
+    "freqcap": "Takt begrenzt", "temp": "Zu heiß", "kiosk": "Kiosk-Browser lief nicht",
+    "web_stale": "Webserver hing", "disk": "Speicher fast voll", "clock": "Uhrzeit nicht synchronisiert",
+    "svc": "Dienst abgestürzt", "restart": "Diagnose-Dienst abgestürzt",
+}
+KIND_LABELS.update({f"k:{k}": label for k, label, _ in KERNEL_PATTERNS})
+
+
+def kind_label(kind, last=None):
+    return KIND_LABELS.get(kind) or (last or {}).get("msg", kind)
+
+
 CONDITION_KINDS = {"net", "wifi_weak", "src:untis", "src:calendar", "src:weather", "auth",
                    "undervolt", "throttled", "templimit", "freqcap", "temp", "kiosk", "web_stale",
                    "disk", "clock", "svc_failed"}
@@ -784,53 +802,79 @@ def line(ev):
     return f"  {mark} {fmt_time(ev['t'])}  {ev.get('msg', '')}{note}"
 
 
-def cmd_status(store, out=print, now=None):
+def advice_for(kind):
+    return ADVICE.get(kind) or ADVICE.get(kind.split(":")[0])
+
+
+def fmt_short(t, now):
+    """Kurz für den Bildschirm: heute nur die Uhrzeit, sonst mit Wochentag."""
+    d, n = dt.datetime.fromtimestamp(t), dt.datetime.fromtimestamp(now)
+    return f"{d:%H:%M}" if d.date() == n.date() else f"{WEEKDAYS[d.weekday()]} {d:%H:%M}"
+
+
+def overview(store, now=None, days=7):
+    """Auswertung für `raspy-diag` und das Diagnose-Panel auf /thermal (beide sagen dasselbe)."""
+    now = now or time.time()
     events = store.events()
     alive = store.read_alive()
-    if not events and not alive:
+    op = open_problems(events)
+    summary = summarize(events, now, days)
+    tips = []
+    for kind in [problem_kind(e) for e in reversed(op)] + [r[0] for r in summary]:
+        tip = advice_for(kind)
+        if tip and tip not in tips:
+            tips.append(tip)
+    return {
+        "events": events, "alive": alive.get("t"),
+        "alive_ok": bool(alive.get("t")) and now - alive["t"] < HEARTBEAT * 2,
+        "open": op, "summary": summary, "tips": tips, "recent": events[-12:],
+    }
+
+
+def cmd_status(store, out=print, now=None):
+    now = now or time.time()
+    o = overview(store, now)
+    events = o["events"]
+    if not events and not o["alive"]:
         out("Noch keine Einträge. Läuft der Dienst?  systemctl status raspy-diag")
         return 0
-    now = now or time.time()
     out("Diagnose-Protokoll (nur auf diesem Pi – nichts wird verschickt)")
-    if alive.get("t"):
-        out(f"Letztes Lebenszeichen:  {fmt_time(alive['t'])}"
-            + ("" if now - alive["t"] < HEARTBEAT * 2 else "  ← Dienst läuft nicht?"))
+    if o["alive"]:
+        out(f"Letztes Lebenszeichen:  {fmt_time(o['alive'])}" + ("" if o["alive_ok"] else "  ← Dienst läuft nicht?"))
     if events:
         out(f"Protokoll seit:         {fmt_time(events[0]['t'])}  "
             f"({len(events)} {'Eintrag' if len(events) == 1 else 'Einträge'})")
 
-    op = open_problems(events)
-    out("\nGerade offen:" if op else "\nGerade offen:           nichts")
-    for ev in op:
+    out("\nGerade offen:" if o["open"] else "\nGerade offen:           nichts")
+    for ev in o["open"]:
         out(f"  {LEVEL_MARK.get(ev['lvl'], '·')} seit {fmt_time(ev['t'])}: {ev['msg']}")
 
-    summary = summarize(events, now)
-    if summary:
+    if o["summary"]:
         out("\nLetzte 7 Tage:")
-        for kind, cnt, dur, typical, last in summary:
-            extra = []
-            if dur:
-                extra.append(f"zusammen {fmt_dur(dur)}")
-            if typical is not None:
-                extra.append(f"meist gegen {typical:02d} Uhr")
-            out(f"  {cnt:3d}×  {last['msg'][:70]}" + (f"  ({', '.join(extra)})" if extra else ""))
-        tips = []
-        for kind, *_ in summary:
-            tip = ADVICE.get(kind) or ADVICE.get(kind.split(":")[0])
-            if tip and tip not in tips:
-                tips.append(tip)
-        if tips:
-            out("\nWas helfen kann:")
-            for tip in tips[:4]:
-                out(f"  → {tip}")
+        for kind, cnt, dur, typical, last in o["summary"]:
+            extra = summary_extra(dur, typical)
+            out(f"  {cnt:3d}×  {kind_label(kind, last)}" + (f"  ({extra})" if extra else ""))
     else:
         out("\nLetzte 7 Tage:          keine Probleme")
+    if o["tips"]:
+        out("\nWas helfen kann:")
+        for tip in o["tips"][:4]:
+            out(f"  → {tip}")
 
     out("\nLetzte Einträge:")
-    for ev in events[-12:]:
+    for ev in o["recent"]:
         out(line(ev))
     out("\nMehr: raspy-diag log · jetzt prüfen: raspy-diag check · Bericht: raspy-diag export")
     return 0
+
+
+def summary_extra(dur, typical):
+    extra = []
+    if dur:
+        extra.append(f"zusammen {fmt_dur(dur)}")
+    if typical is not None:
+        extra.append(f"meist gegen {typical:02d} Uhr")
+    return ", ".join(extra)
 
 
 def cmd_log(store, days=7, out=print):

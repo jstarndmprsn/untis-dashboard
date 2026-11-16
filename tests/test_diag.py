@@ -371,3 +371,44 @@ def test_dashboard_writes_source_state(tmp_path, monkeypatch):
     src.run()
     data = json.loads((tmp_path / "sources.json").read_text())
     assert data["sources"]["untis"]["ok"] is False and "kaputt" in data["sources"]["untis"]["error"]
+
+
+# ───────────────────────── Panel auf /thermal ─────────────────────────
+@pytest.fixture
+def web(tmp_path, monkeypatch):
+    import argparse
+    import server
+    monkeypatch.setattr(rd, "STATE_DIR", str(tmp_path))
+    app = server.create_app(server.load_config(argparse.Namespace(demo=True, no_calendar=False, port=None)))
+    return app.test_client(), rd.Store(str(tmp_path))
+
+
+def test_panel_api_shows_open_problems_and_summary(web):
+    client, store = web
+    now = time.time()
+    store.append({"t": now - 3 * 86400, "k": "unclean", "lvl": "err", "msg": "Vorheriger Betrieb endete …"})
+    store.append({"t": now - 600, "k": "undervolt", "lvl": "err", "state": "bad", "msg": "Unterspannung"})
+    store.write_alive({"boot": "x", "t": now, "clean": False})
+    j = client.get("/api/diag").get_json()
+    assert j["enabled"] and j["alive_ok"]
+    assert [p["msg"] for p in j["open"]] == ["Unterspannung"]
+    assert {s["msg"] for s in j["summary"]} == {"Unterspannung", "Strom weg oder eingefroren (ohne Herunterfahren)"}
+    assert "Netzteil" in j["tip"]                              # Tipp zum offenen Problem zuerst
+    assert j["recent"][0]["msg"] == "Unterspannung"            # neueste zuerst
+
+
+def test_panel_api_only_for_the_pi_itself(web):
+    client, store = web
+    store.append({"t": time.time(), "k": "boot", "lvl": "info", "msg": "Pi gestartet"})
+    assert client.get("/api/diag").status_code == 200
+    for addr in ("192.168.1.23", "10.0.0.5", "fe80::1"):
+        r = client.get("/api/diag", environ_base={"REMOTE_ADDR": addr})
+        assert r.status_code == 403 and b"Pi gestartet" not in r.data
+
+
+def test_panel_hidden_without_extra(web, monkeypatch, tmp_path):
+    client, _ = web
+    monkeypatch.setattr(rd, "STATE_DIR", str(tmp_path / "gibt-es-nicht"))
+    assert client.get("/api/diag").get_json() == {"enabled": False}
+    page = client.get("/thermal").get_data(as_text=True)
+    assert 'id="diag-panel" hidden' in page

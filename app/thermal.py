@@ -7,19 +7,27 @@ Die Seite wird von button.py als eigenes Chromium-Fenster geöffnet
 
 Der Überhitzungsschutz selbst läuft unabhängig davon als raspy-thermal.service
 (device/thermal_guard.py) und schreibt seinen Zustand nach /run/raspy/thermal_guard.json.
+
+Mit dem Diagnose-Extra zeigt die Seite zusätzlich ein Panel "Diagnose" (/api/diag): offene
+Probleme, Häufungen der letzten 7 Tage, ein Tipp, die letzten Einträge – dieselbe Auswertung wie
+`raspy-diag`. /api/diag antwortet nur dem Pi selbst, auch mit LAN_ACCESS=1.
 """
 import glob
 import json
 import os
 import subprocess
+import sys
 import threading
 import time
 from collections import deque
 
 import psutil
-from flask import jsonify, render_template
+from flask import abort, jsonify, render_template, request
 
 import config
+
+sys.path.insert(0, os.path.join(config.ROOT, "diag"))
+import raspy_diag  # noqa: E402  (nur Standardbibliothek)
 
 SAMPLE_INTERVAL = 2          # Sekunden
 HISTORY_SECONDS = 15 * 60
@@ -146,6 +154,38 @@ def guard_state():
         return {"alive": False}
 
 
+LOCAL_ADDRS = ("127.0.0.1", "::1", "::ffff:127.0.0.1")
+DIAG_RECENT = 5
+
+
+def diag_enabled():
+    d = raspy_diag.STATE_DIR
+    return os.path.isdir(d) and os.access(d, os.R_OK | os.X_OK)
+
+
+def diag_overview(now=None):
+    """Kurzfassung für das Panel – schon fertig formuliert, die Seite zeigt sie nur an."""
+    now = now or time.time()
+    if not diag_enabled():
+        return {"enabled": False}
+    o = raspy_diag.overview(raspy_diag.Store(raspy_diag.STATE_DIR), now)
+
+    def item(ev):
+        return {"lvl": ev.get("lvl", "info"), "msg": ev.get("msg", ""),
+                "when": raspy_diag.fmt_short(ev["t"], now), "unsynced": bool(ev.get("unsynced"))}
+
+    return {
+        "enabled": True,
+        "alive_ok": o["alive_ok"],
+        "open": [item(e) for e in o["open"]][-3:],
+        "summary": [{"count": cnt, "msg": raspy_diag.kind_label(kind, last), "lvl": last.get("lvl", "warn"),
+                     "extra": raspy_diag.summary_extra(dur, typical)}
+                    for kind, cnt, dur, typical, last in o["summary"][:3]],
+        "tip": o["tips"][0] if o["tips"] else None,
+        "recent": [item(e) for e in reversed(o["recent"][-DIAG_RECENT:])],
+    }
+
+
 _sampler = None
 
 
@@ -165,6 +205,17 @@ def init(app):
             "procs": top_processes(), "guard": guard_state(),
             "limits": {"warn": TEMP_WARN, "fan_emergency": TEMP_FAN_EMERGENCY, "fan_max_rpm": FAN_MAX_RPM},
         })
+
+    register_diag(app)
+
+
+def register_diag(app):
+    @app.route("/api/diag")
+    def api_diag():
+        # Das Protokoll gehört auf den Bildschirm im Raum, nicht ins Schulnetz (auch nicht mit LAN_ACCESS=1)
+        if request.remote_addr not in LOCAL_ADDRS:
+            abort(403)
+        return jsonify(diag_overview()), 200, {"Cache-Control": "no-store"}
 
 
 def start():

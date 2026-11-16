@@ -18,6 +18,10 @@
   Turning the extra off deletes the log.
 - Python standard library only, so it keeps working when the Python environment is broken.
   The web server now writes the state of its data sources to `/run/raspy/sources.json` (RAM).
+- **On the screen, too:** the system page (hold both buttons) gets a *Diagnose* panel – open
+  problems, the last 7 days with the usual time of day, a tip and the newest entries, without a
+  laptop or SSH. Its data (`/api/diag`) is only served to the Pi itself, even with `LAN_ACCESS=1`.
+  Without the extra the page is unchanged.
 
 ### Added – calendar colours in the settings
 

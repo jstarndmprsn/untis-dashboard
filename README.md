@@ -241,6 +241,13 @@ raspy-diag export         # save a cleaned-up report as a text file (to a USB st
 sudo raspy-diag clear     # delete the log
 ```
 
+It also shows up on the screen: hold **both buttons** for 2 s to open the system page – with the
+extra installed it has a *Diagnose* panel with open problems, the last 7 days (and the usual time
+of day), a tip and the newest entries. It takes the place of the per-core and process lists; the
+overheat protection notes always stay visible. Without the extra the page looks exactly as before.
+
+![System page with the diagnostics panel](docs/thermal-diagnose.png)
+
 What it records – only when something changes, so the SD card isn't worn down:
 network down/back (and weak Wi-Fi signal), Untis/calendar/weather unreachable (with the reason:
 DNS, proxy, timeout, certificate …) or login rejected, under-voltage and throttling, overheating,
@@ -258,6 +265,8 @@ Pi was shut down properly or lost power (with the time of the last sign of life)
   school name, calendar link, student names or timetable content (they are filtered out before
   writing). It lives in `/var/lib/raspy-diag` (at most ~1 MB, oldest entries drop out), readable
   only by root and your user.
+- The panel's data (`/api/diag`) is only served to the Pi itself – even with `LAN_ACCESS=1`, other
+  devices on the network get "403 Forbidden", so the log never leaves the room.
 - `raspy-diag export` additionally removes your username, the Pi's name and public IP addresses.
   The report stays where you saved it – share it only if you want to (read it first).
 - Turning the extra off again (`./install.sh` → no) or `./install.sh --uninstall` deletes the log.

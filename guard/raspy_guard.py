@@ -66,7 +66,7 @@ LOG_MAX = 1_000_000
 # Dateien -> was nach dem Umschalten neu gestartet bzw. neu angewendet werden muss
 APPLY_PATTERNS = (r"^install\.sh$", r"^system/", r"^guard/")
 RESTART_RULES = {
-    "raspy-web.service": (r"^app/",),
+    "raspy-web.service": (r"^app/", r"^diag/"),       # /thermal zeigt das Diagnose-Panel
     "raspy-buttons.service": (r"^device/button\.py$", r"^device/shutdown_overlay\.py$", r"^app/config\.py$"),
     "raspy-thermal.service": (r"^device/thermal_guard\.py$", r"^device/overheat_overlay\.py$", r"^app/config\.py$"),
     "raspy-diag.service": (r"^diag/",),
