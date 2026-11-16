@@ -4,12 +4,13 @@ Webserver für die Klassen-Anzeige (Port 5000, PORT in config.env).
   /         Wochen-Stundenplan mit Vertretungen (Tabelle: week.py, Daten: dashboard.py)
   /heute    Tagesansicht (dashboard.py)
   /thermal  System-/Temperatur-Dashboard (thermal.py)
+  /themes/… Design-Themes (themes.py, Anleitung: themes/README.md)
 
 Standardmäßig nur vom Pi selbst erreichbar (127.0.0.1) – der Kiosk braucht nicht mehr.
 Von anderen Geräten im Netz nur mit LAN_ACCESS=1 in config.env.
 
 Einstellungen: config.env im Projektordner (anlegen mit `python3 app/configure.py`).
-Ausprobieren ohne Untis-Konto:  python3 app/server.py --demo   [--no-calendar] [--port 5077]
+Ausprobieren ohne Untis-Konto:  python3 app/server.py --demo   [--no-calendar] [--port 5077] [--theme NAME]
 """
 import argparse
 import hashlib
@@ -22,13 +23,14 @@ from flask import Flask, render_template
 import config
 import dashboard
 import thermal
+import themes
 import untis
 import week
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
 LOADING = """
-                <div class='error' style='color: #888;'>
+                <div class='error loading'>
                     <div style='text-align: center; font-size: 0.8em; font-weight: normal;'>{}</div>
                 </div>"""
 FAILED = """
@@ -36,8 +38,8 @@ FAILED = """
                     <div style='text-align: center;'>
                         <div style='font-size: 3em; margin-bottom: 20px;'>⚠️</div>
                         <div style='font-size: 1.5em; margin-bottom: 10px;'>{}</div>
-                        <div style='font-size: 0.8em; color: #aaa;'>{}</div>
-                        <div style='font-size: 0.6em; color: #666; margin-top: 20px;'>Wird automatisch aktualisiert...</div>
+                        <div class='msg-sub' style='font-size: 0.8em;'>{}</div>
+                        <div class='msg-hint' style='font-size: 0.6em; margin-top: 20px;'>Wird automatisch aktualisiert...</div>
                     </div>
                 </div>"""
 
@@ -87,21 +89,30 @@ def create_app(cfg):
     master = untis.MasterData(cfg)
     dashboard.init(app, cfg, master)
     thermal.init(app)                   # Thermal-Dashboard /thermal (beide Tasten 2 s halten)
+    themes.init(app, cfg)               # Design-Themes (THEME in config.env)
     version = asset_version()
+
+    # Kennung = Programmstand + aktives Theme: ändert sich eins davon, lädt die Seite einmal neu
+    def page_version():
+        key = themes.key_for("woche")
+        return f"{version}-{key}" if key else version
 
     @app.route("/content")
     def content():
-        return render_content(master), 200, {"X-Version": version, "Cache-Control": "no-store"}
+        return render_content(master), 200, {"X-Version": page_version(), "Cache-Control": "no-store"}
 
     @app.route("/")
     def index():
-        return render_template("woche.html", content=render_content(master), version=version)
+        return render_template("woche.html", content=render_content(master), version=version,
+                               page_version=page_version())
 
     return app
 
 
 def load_config(args):
     cfg = config.load()
+    if getattr(args, "theme", None) is not None:
+        cfg["THEME"] = args.theme
     if args.demo:
         cfg["DEMO"] = "1"
     if config.demo(cfg):
@@ -121,6 +132,7 @@ def main():
     ap.add_argument("--demo", action="store_true", help="erfundene Beispieldaten statt Untis")
     ap.add_argument("--no-calendar", action="store_true", help="Demo ohne Kalender-Spalte")
     ap.add_argument("--port", type=int)
+    ap.add_argument("--theme", help="Design-Theme (Ordnername in themes/, 'auto' oder 'standard')")
     args = ap.parse_args()
 
     cfg = load_config(args)

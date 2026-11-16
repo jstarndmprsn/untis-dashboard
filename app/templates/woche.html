@@ -5,10 +5,14 @@
 <meta name="google" content="notranslate">
 <title>Stundenplan</title>
 <link rel="stylesheet" href="/static/woche.css?v={{ version }}">
+{% set th = theme_for("woche") %}{% if th %}<link rel="stylesheet" href="{{ th.css }}">{% endif %}
 </head>
-<body data-version="{{ version }}">
+<body class="page-woche{% if th %} theme-{{ th.id }}{% endif %}" data-version="{{ page_version }}">
+{% if th %}<div class="theme-back" aria-hidden="true"></div>{% endif %}
 <div id="version-screen">{{ version }}</div>
 <div id="content">{{ content|safe }}</div>
+{% if th %}<div class="theme-front" aria-hidden="true"></div>{% endif %}
 <script src="/static/woche.js?v={{ version }}"></script>
+{% if th and th.js %}<script src="{{ th.js }}"></script>{% endif %}
 </body>
 </html>

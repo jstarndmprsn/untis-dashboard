@@ -29,6 +29,9 @@ The display itself is in German (that's where WebUntis is used most); setup and 
   that are safe to interrupt (off by default), a **custom boot animation**, a
   **software watchdog** that installs released versions by itself, and a **diagnostics log**
   that stays on the Pi (see below).
+- **Design themes** – your own colours, fonts, backgrounds and decoration (a Christmas look,
+  the school's colours …), switched on in the settings or automatically for a season
+  ([how to make one](themes/README.md)).
 
 ## What you need
 
@@ -70,6 +73,7 @@ raspy settings
    5  Calendar         on
    6  Weather          Musterstadt
    7  Screen schedule  Mon–Fri 07:30–16:00 on, otherwise off after 10 min idle
+   8  Theme            standard
 
    t  Test the settings
    s  Save and exit
@@ -155,9 +159,27 @@ hand: `sudo systemctl restart raspy-web`.
 | `WEATHER_LAT`, `WEATHER_LON` | optional; empty = no weather |
 | `SCREEN_SCHEDULE` | `1` = use the screen schedule below, `0` = screen always on |
 | `SCREEN_ON_FROM`, `SCREEN_ON_UNTIL`, `SCREEN_IDLE_OFF` | screen always on Mon–Fri in this window, otherwise off after N seconds idle |
+| `THEME` | design theme: empty = built-in, `auto` = a theme while its season runs, or a theme's folder name ([themes/README.md](themes/README.md)) |
 | `BUTTON_TAB_GPIO`, `BUTTON_POWER_GPIO`, `PORT` | hardware pins, web server port |
 
 Subject colours are in `SUBJECT_COLORS` in `app/dashboard.py`; unknown subjects get a stable colour of their own.
+
+## Design themes
+
+All colours, fonts and roundings of the pages are CSS variables, so a theme is just a folder with a
+`theme.css` that overrides some of them – plus, if you like, pictures, a font, decoration in front of
+or behind the content, and a small `theme.js`. raspy ships without themes; to make one:
+
+```bash
+cp -r themes/_template themes/christmas      # edit theme.json + theme.css
+# look at it: http://127.0.0.1:5000/heute?theme=christmas   (or: app/server.py --demo --theme christmas)
+./install.sh --configure                     # → Theme → Christmas, or "Automatic"
+```
+
+With **Automatic** a theme is active only during the season in its `theme.json` (e.g. `12-01..12-26`)
+and the built-in design otherwise. Your own themes can also live in `~/.config/raspy/themes/`, where
+updates never touch them. Open pages switch by themselves. Full guide, list of variables and tips
+for the Pi: [themes/README.md](themes/README.md).
 
 ## Troubleshooting
 
@@ -278,13 +300,14 @@ that's how the diagnostics know about Untis without going online themselves.
 
 ```
 app/          Flask server: server.py (app + week view page), week.py (week table), dashboard.py
-              (/heute + all Untis data), thermal.py (/thermal), untis.py (WebUntis client),
+              (/heute + all Untis data), thermal.py (/thermal), themes.py (design themes), untis.py (WebUntis client),
               configure.py (setup), demo.py, templates/, static/
 tests/        pytest suite (python -m pytest), runs in CI together with shellcheck
 device/       runs on the Pi: buttons, overlays, fan/overheat guard, boot splash, kiosk, screen schedule
 system/       systemd units and config templates used by install.sh
 guard/        software watchdog (raspy_guard.py – Python standard library only)
 diag/         diagnostics log (raspy_diag.py – Python standard library only)
+themes/       design themes (none shipped yet): README.md = guide, _template/ = starting point
 boot/         boot animation generator (make_frames.py) and logo
 ```
 

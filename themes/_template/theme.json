@@ -1,0 +1,6 @@
+{
+  "name": "My theme",
+  "description": "One line shown in the settings menu",
+  "season": "12-01..12-26",
+  "pages": ["heute", "woche", "thermal"]
+}

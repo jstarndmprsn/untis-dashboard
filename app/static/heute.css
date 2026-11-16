@@ -1,14 +1,26 @@
-/* ───────── Tagesansicht "Heute" – 1920×1080 ───────── */
+/* ───────── Tagesansicht "Heute" – 1920×1080 ─────────
+   Alle Farben, Schriften und Rundungen stehen als Variablen hier oben – ein Design-Theme
+   (themes/<name>/theme.css) überschreibt sie. Liste und Anleitung: themes/README.md */
 :root {
   --bg: #121317;
+  --bg-glow:                                   /* Farbverlauf über --bg (Theme: auch url(...) möglich) */
+    radial-gradient(760px 620px at 88% 18%, rgba(108, 84, 230, 0.38), transparent 62%),
+    radial-gradient(640px 560px at 70% 88%, rgba(24, 150, 170, 0.28), transparent 62%),
+    radial-gradient(700px 600px at 6% 96%, rgba(220, 70, 60, 0.12), transparent 60%),
+    radial-gradient(900px 700px at 40% 40%, rgba(255, 255, 255, 0.03), transparent 70%);
   --text: #f5f5f7;
   --muted: rgba(245, 245, 247, 0.55);
   --faint: rgba(245, 245, 247, 0.32);
-  --card: rgba(255, 255, 255, 0.07);
-  --card-line: rgba(255, 255, 255, 0.09);
-  --red: #ff5a52;
-  --green: #5fe07a;
-  --cyan: #45c8e0;
+  --surface: rgba(255, 255, 255, 0.07);        /* Karten (Stunden) */
+  --surface-line: rgba(255, 255, 255, 0.09);
+  --surface-now: rgba(255, 255, 255, 0.11);    /* Karte der laufenden Stunde */
+  --cancelled: #ff5a52;
+  --changed: #5fe07a;
+  --event: #45c8e0;
+  --warn: #e0a040;                             /* Punkt vor "Stand HH:MM" und in der Statuszeile */
+  --homework: #ffcc4d;                         /* Symbol "Hausaufgabe fällig" */
+  --divider: rgba(255, 255, 255, 0.12);         /* Trennlinie zwischen parallelen Kursen */
+  --font: "Inter", "Noto Sans", sans-serif;
   --radius: 24px;
 }
 
@@ -17,7 +29,7 @@
 html, body {
   width: 1920px; height: 1080px; overflow: hidden;
   background: var(--bg); color: var(--text);
-  font-family: "Inter", "Noto Sans", sans-serif;
+  font-family: var(--font);
   font-feature-settings: "tnum" 1, "cv11" 1;
   -webkit-font-smoothing: antialiased;
   cursor: none;
@@ -26,12 +38,7 @@ html, body {
 /* Statischer Farbverlauf im Hintergrund – gibt dem Glas etwas zum Brechen */
 .bg {
   position: fixed; inset: 0; z-index: -1;
-  background:
-    radial-gradient(760px 620px at 88% 18%, rgba(108, 84, 230, 0.38), transparent 62%),
-    radial-gradient(640px 560px at 70% 88%, rgba(24, 150, 170, 0.28), transparent 62%),
-    radial-gradient(700px 600px at 6% 96%, rgba(220, 70, 60, 0.12), transparent 60%),
-    radial-gradient(900px 700px at 40% 40%, rgba(255, 255, 255, 0.03), transparent 70%),
-    var(--bg);
+  background: var(--bg-glow), var(--bg);
 }
 
 .grid {
@@ -65,7 +72,7 @@ html, body {
 .title-top { margin-top: 118px; }
 
 .stale { font-size: 18px; font-weight: 400; color: var(--faint); }
-.stale:not(:empty)::before { content: "● "; color: #e0a040; }
+.stale:not(:empty)::before { content: "● "; color: var(--warn); }
 
 /* ───── Stunden ───── */
 .lessons { display: flex; flex-direction: column; gap: 14px; flex: 1; min-height: 0; }
@@ -82,8 +89,8 @@ html, body {
 
 .card {
   flex: 1; display: flex; min-width: 0;
-  background: var(--card);
-  border: 2px solid var(--card-line);
+  background: var(--surface);
+  border: 2px solid var(--surface-line);
   border-radius: var(--radius);
   overflow: hidden; position: relative;
 }
@@ -92,10 +99,10 @@ html, body {
   background: linear-gradient(90deg, var(--c1), transparent);
   opacity: 0.9;
 }
-.card.cancelled { border-color: var(--red); }
-.card.changed { border-color: var(--green); }
-.card.event { border-color: var(--cyan); }
-.slot.now .card { box-shadow: 0 0 0 1px rgba(255,255,255,.25), 0 10px 40px rgba(0,0,0,.35); background: rgba(255,255,255,.11); }
+.card.cancelled { border-color: var(--cancelled); }
+.card.changed { border-color: var(--changed); }
+.card.event { border-color: var(--event); }
+.slot.now .card { box-shadow: 0 0 0 1px rgba(255,255,255,.25), 0 10px 40px rgba(0,0,0,.35); background: var(--surface-now); }
 
 .course {
   flex: 1; min-width: 0; position: relative;
@@ -103,9 +110,9 @@ html, body {
   align-items: center; column-gap: 12px;
   padding: 8px 26px 8px 40px;
 }
-.course + .course { border-left: 2px solid rgba(255,255,255,.12); padding-left: 20px; }
-.course.cancelled + .course, .course + .course.cancelled { border-left-color: rgba(255, 90, 82, .7); }
-.course.changed + .course, .course + .course.changed { border-left-color: rgba(95, 224, 122, .7); }
+.course + .course { border-left: 2px solid var(--divider); padding-left: 20px; }
+.course.cancelled + .course, .course + .course.cancelled { border-left-color: color-mix(in srgb, var(--cancelled) 70%, transparent); }
+.course.changed + .course, .course + .course.changed { border-left-color: color-mix(in srgb, var(--changed) 70%, transparent); }
 
 .subj { font-size: 26px; font-weight: 600; grid-column: 1 / -1; white-space: nowrap; min-width: 0;
         display: flex; align-items: center; gap: 12px; }
@@ -115,8 +122,8 @@ html, body {
 .marks { display: flex; gap: 6px; flex: none; }
 .mark svg { width: 0.85em; height: 0.85em; display: block; fill: none; stroke: currentColor;
             stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.mark.hw { color: #ffcc4d; }
-.mark.notes { color: rgba(245, 245, 247, 0.7); }
+.mark.hw { color: var(--homework); }
+.mark.notes { color: color-mix(in srgb, var(--text) 70%, transparent); }
 .who, .where { font-size: 22px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .where { text-align: right; }
 
@@ -139,9 +146,9 @@ html, body {
 .lessons.compact .card.multi .subj { font-size: 20px; }
 .lessons.compact .card.multi .who, .lessons.compact .card.multi .where { font-size: 17px; }
 
-.course.cancelled .subj { color: var(--red); }
+.course.cancelled .subj { color: var(--cancelled); }
 .old { text-decoration: line-through; text-decoration-thickness: 2px; color: var(--faint); }
-.new { color: var(--green); }
+.new { color: var(--changed); }
 
 .empty-state {
   flex: 1; display: flex; align-items: center; justify-content: center; text-align: center;
@@ -162,7 +169,7 @@ html, body {
 .task-head .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--c1); flex: none; align-self: center; box-shadow: 0 0 12px var(--c1); }
 .task-head .meta { font-size: 21px; font-weight: 400; color: var(--muted); margin-left: auto; white-space: nowrap; }
 .task-text {
-  font-size: 27px; line-height: 1.32; white-space: pre-line; color: rgba(245,245,247,.9);
+  font-size: 27px; line-height: 1.32; white-space: pre-line; color: color-mix(in srgb, var(--text) 90%, transparent);
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5; overflow: hidden;
   padding-left: 28px;
 }
@@ -210,4 +217,11 @@ html, body {
   position: fixed; left: 64px; bottom: 16px; font-size: 17px; color: var(--faint);
   display: flex; gap: 26px;
 }
-.status span::before { content: "● "; color: #e0a040; }
+.status span::before { content: "● "; color: var(--warn); }
+
+/* Deko-Ebenen für Design-Themes (ohne Theme leer und unsichtbar):
+   .theme-back hinter dem Inhalt (über dem Hintergrund), .theme-front davor (z. B. Schneefall) –
+   beide lassen Klicks durch. Siehe themes/README.md */
+.theme-back, .theme-front { position: fixed; inset: 0; pointer-events: none; }
+.theme-back { z-index: -1; }
+.theme-front { z-index: 1000; }

@@ -27,6 +27,7 @@ from flask import jsonify, render_template, request
 
 import config
 import demo
+import themes
 import untis
 
 # ------------------ KONFIGURATION ------------------
@@ -723,6 +724,7 @@ def init(app, cfg, master):
             "features": {"calendar": "calendar" in _sources, "weather": "weather" in _sources},
             "status": {k: source_status(v) for k, v in _sources.items()},
             "notice": read_notice(_notice["path"]),
+            "theme": themes.key_for("heute"),
         })
 
 

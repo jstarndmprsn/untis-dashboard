@@ -4,10 +4,13 @@
 <meta charset="UTF-8">
 <meta name="google" content="notranslate">
 <title>Heute · lädt</title>
-<link rel="stylesheet" href="/static/heute.css?v=5">
+<link rel="stylesheet" href="/static/heute.css?v=6">
+{% set th = theme_for("heute") %}{% if th %}<link rel="stylesheet" href="{{ th.css }}">{% endif %}
 </head>
-<body class="{{ '' if calendar else 'no-calendar' }}">
+<body class="page-heute{{ '' if calendar else ' no-calendar' }}{% if th %} theme-{{ th.id }}{% endif %}"
+      data-theme="{{ th.key if th else '' }}">
 <div class="bg"></div>
+{% if th %}<div class="theme-back" aria-hidden="true"></div>{% endif %}
 <main class="grid">
 
   <!-- Spalte 1: Kopf + Stunden -->
@@ -42,7 +45,9 @@
 </main>
 
 <div id="status" class="status"></div>
+{% if th %}<div class="theme-front" aria-hidden="true"></div>{% endif %}
 
-<script src="/static/heute.js?v=9"></script>
+<script src="/static/heute.js?v=10"></script>
+{% if th and th.js %}<script src="{{ th.js }}"></script>{% endif %}
 </body>
 </html>
