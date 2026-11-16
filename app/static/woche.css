@@ -1,43 +1,76 @@
-/* Wochenansicht (/) – 1920×1080, Design wie seit V.1.x */
-body { margin: 0; font-family: Arial, Helvetica, sans-serif; background: #111; color: #fff; }
+/* Wochenansicht (/) – 1920×1080, Design wie seit V.1.x
+   Farben, Schrift und Rundungen als Variablen – ein Design-Theme überschreibt sie (themes/README.md) */
+:root {
+  --bg: #111;
+  --text: #fff;
+  --muted: #aaa;              /* Datum im Tageskopf */
+  --faint: #888;              /* Text "wird geladen", durchgestrichene Lehrer/Räume */
+  --dim: #666;                /* "Keine Stunden", kleine Hinweise */
+  --surface: #333;            /* Stunden-Zellen */
+  --surface-line: #333;       /* Rahmen der Tageskopf-Zellen */
+  --header-bg: #222;          /* Tageskopf, Stundenspalte, "Keine Stunden" */
+  --today: rgb(255, 96, 54);  /* heutiger Tag im Tageskopf */
+  --note: #bbb;               /* Zusatztext, Symbol "Notiz" */
+  --divider: #555;            /* Trennlinie zwischen parallelen Kursen */
+  --cancelled: #ff3333;
+  --changed: #4caf50;
+  --event: #00bcd4;
+  --error: #ff3333;
+  --homework: #ffcc4d;
+  --stale-bg: #5a1a1a;        /* Hinweis "Untis nicht erreichbar – Stand …" */
+  --stale-text: #ffb3b3;
+  --font: Arial, Helvetica, sans-serif;
+  --radius: 15px;
+}
+body { margin: 0; font-family: var(--font); background: var(--bg); color: var(--text); }
 table { width: 100vw; height: 100vh; border-collapse: separate; border-spacing: 10px; table-layout: fixed; }
-th { background: #222; font-size: 1.5em; color: #fff; border: 1px solid #333; padding: 3px; text-align: center; border-radius: 3px; }
+th { background: var(--header-bg); font-size: 1.5em; color: var(--text); border: 1px solid var(--surface-line); padding: 3px; text-align: center; border-radius: 3px; }
 th:first-child { width: 120px; font-size: 1.2em; }
-th.today { color: rgb(255, 96, 54); }
-th .date { display: block; font-size: 0.9em; color: #aaa; margin-top: 3px; }
-td { font-size: 1.1em; padding: 10px 10px 10px 18px; border-radius: 15px; background: #333; color: #fff; position: relative; border: 3px solid transparent; overflow: hidden; word-wrap: break-word; }
-td::before { content: ''; position: absolute; left: 0; top: 0; width: 8px; height: 100%; border-radius: 15px 0 0 15px; background: transparent; }
+th.today { color: var(--today); }
+th .date { display: block; font-size: 0.9em; color: var(--muted); margin-top: 3px; }
+td { font-size: 1.1em; padding: 10px 10px 10px 18px; border-radius: var(--radius); background: var(--surface); color: var(--text); position: relative; border: 3px solid transparent; overflow: hidden; word-wrap: break-word; }
+td::before { content: ''; position: absolute; left: 0; top: 0; width: 8px; height: 100%; border-radius: var(--radius) 0 0 var(--radius); background: transparent; }
 td .subject { font-weight: bold; display: block; }
 td .info { font-size: 0.95em; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-td .note { color: #bbb; }
-.empty { background: #111; border: none; }
-.error { display: flex; align-items: center; justify-content: center; height: 100vh; font-size: 2.5em; font-weight: bold; color: #ff3333; }
+td .note { color: var(--note); }
+.empty { background: var(--bg); border: none; }
+.error { display: flex; align-items: center; justify-content: center; height: 100vh; font-size: 2.5em; font-weight: bold; color: var(--error); }
+.error.loading { color: var(--faint); }
+.error .msg-sub { color: var(--muted); }
+.error .msg-hint { color: var(--dim); }
 
 /* Vertretungs-Styles */
-td.substitution { border-color: #4caf50 !important; }
-td.cancelled { border-color: #ff3333 !important; }
-td.event { border-color: #00bcd4 !important; }
-.old-teacher { text-decoration: line-through; color: #888; }
-.new-teacher, .new-room, .new-subject { color: #4caf50; border-bottom: 2px solid #4caf50; padding-bottom: 1px; }
+td.substitution { border-color: var(--changed) !important; }
+td.cancelled { border-color: var(--cancelled) !important; }
+td.event { border-color: var(--event) !important; }
+.old-teacher { text-decoration: line-through; color: var(--faint); }
+.new-teacher, .new-room, .new-subject { color: var(--changed); border-bottom: 2px solid var(--changed); padding-bottom: 1px; }
 
 /* Untis-Markierungen: Hausaufgabe fällig / Notiz */
 .marks { white-space: nowrap; margin-left: 0.3em; }
 .mark { width: 0.9em; height: 0.9em; vertical-align: -0.1em; margin-left: 0.2em; fill: none; stroke-width: 2;
         stroke-linecap: round; stroke-linejoin: round; }
-.mark.hw { stroke: #ffcc4d; }
-.mark.notes { stroke: #bbb; }
+.mark.hw { stroke: var(--homework); }
+.mark.notes { stroke: var(--note); }
 
 /* Multi-Course Styles */
 .multi-course { display: flex; gap: 3px; height: 100%; }
-.course { flex: 1; min-width: 0; padding: 2px; border-left: 1px solid #555; }
+.course { flex: 1; min-width: 0; padding: 2px; border-left: 1px solid var(--divider); }
 .course:first-child { border-left: none; }
 td.multi::before { background: var(--stripe-gradient, var(--stripe-color)) !important; }
 
 /* Fullscreen Version Display */
-#version-screen { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #111; color: #fff; align-items: center; justify-content: center; font-size: 5em; font-weight: bold; z-index: 9999; }
+#version-screen { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: var(--bg); color: var(--text); align-items: center; justify-content: center; font-size: 5em; font-weight: bold; z-index: 9999; }
 
 td.normal::before { background: var(--stripe-color); }
 table.compact td { padding-top: 4px; padding-bottom: 4px; }
 table.compact td br { display: none; }
-.no-school { background: #222; color: #666; font-size: 1.5em; text-align: center; padding: 50px; border-radius: 15px; }
-.stale { position: fixed; bottom: 6px; right: 12px; background: #5a1a1a; color: #ffb3b3; padding: 4px 10px; border-radius: 6px; font-size: 0.9em; z-index: 100; }
+.no-school { background: var(--header-bg); color: var(--dim); font-size: 1.5em; text-align: center; padding: 50px; border-radius: var(--radius); }
+.stale { position: fixed; bottom: 6px; right: 12px; background: var(--stale-bg); color: var(--stale-text); padding: 4px 10px; border-radius: 6px; font-size: 0.9em; z-index: 100; }
+
+/* Deko-Ebenen für Design-Themes (ohne Theme leer und unsichtbar):
+   .theme-back hinter dem Inhalt (über dem Hintergrund), .theme-front davor (z. B. Schneefall) –
+   beide lassen Klicks durch. Siehe themes/README.md */
+.theme-back, .theme-front { position: fixed; inset: 0; pointer-events: none; }
+.theme-back { z-index: -1; }
+.theme-front { z-index: 1000; }

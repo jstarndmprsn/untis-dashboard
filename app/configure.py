@@ -302,6 +302,44 @@ def step_weather(cfg):
             return
 
 
+def theme_summary(cfg):
+    import themes
+    return themes.describe(cfg.get("THEME", ""))
+
+
+def step_theme(cfg):
+    import themes
+    found = themes.available(fresh=True)
+    print("  Design themes change colours, fonts and backgrounds of all pages (e.g. for Christmas).")
+    print("  " + c("2", "How to make one: themes/README.md · own themes also in ~/.config/raspy/themes/"))
+    print(f"  Current: {theme_summary(cfg)}")
+    for t in found.values():
+        for p in t.problems:
+            warn(f"{t.id}: {p}")
+    seasonal = [t for t in found.values() if t.season]
+
+    def season_text(t):
+        (m1, d1), (m2, d2) = t.season
+        return f"{d1:02d}.{m1:02d}.–{d2:02d}.{m2:02d}."
+
+    items = [("standard", "Standard (built-in design)"),
+             ("auto", "Automatic – a theme while its season runs, otherwise standard"
+              + (f" ({', '.join(f'{t.name} {season_text(t)}' for t in seasonal)})" if seasonal
+                 else c("2", " (no theme with a season installed yet)")))]
+    items += [(t.id, t.name + (f" – {t.description}" if t.description else "")
+               + (c("2", f"  [{season_text(t)}]") if t.season else "")) for t in found.values()]
+    if not found:
+        print("  " + c("2", "No themes installed yet – the list only has the built-in design for now."))
+    choice = choose(items, lambda it: it[1])
+    if choice is None:
+        return
+    cfg["THEME"] = "" if choice[0] == "standard" else choice[0]
+    ok(f"Theme: {theme_summary(cfg)}")
+    if choice[0] not in ("standard", "auto"):
+        print("  " + c("2", f"Look at any theme without changing settings: "
+                            f"http://127.0.0.1:{cfg['PORT'] or 5000}/heute?theme={choice[0]}"))
+
+
 def hhmm_ok(v):
     return len(v) == 4 and v.isdigit() and int(v[:2]) < 24 and int(v[2:]) < 60
 
@@ -409,6 +447,9 @@ SECTIONS = [
      ["SCREEN_SCHEDULE", "SCREEN_ON_FROM", "SCREEN_ON_UNTIL", "SCREEN_IDLE_OFF"],
      "SCREEN_SCHEDULE=1: Mon–Fri between FROM and UNTIL (HHMM) the screen stays on; otherwise off after\n"
      "IDLE_OFF seconds without a button press. SCREEN_SCHEDULE=0: the screen is always on."),
+    ("Design", ["THEME"],
+     "THEME: design theme – empty = built-in, \"auto\" = a theme while its season runs (e.g. Christmas),\n"
+     "otherwise the folder name of a theme in themes/ or ~/.config/raspy/themes/ (see themes/README.md)."),
     ("Software watchdog (only with the watchdog extra)", ["GUARD_WINDOWS", "GUARD_APT"],
      "GUARD_WINDOWS: when released versions may be installed, e.g. \"Di,Do 11:35-11:50; Mo-Fr 16:15-18:00\"\n"
      "(empty = only with: sudo raspy-guard update-now). GUARD_APT=1: system updates in the same windows."),
@@ -549,6 +590,7 @@ def menu_items(buttons, guard=False):
         ("Weather", lambda g: (g["WEATHER_PLACE"] or f"{g['WEATHER_LAT']}, {g['WEATHER_LON']}")
          if g["WEATHER_LAT"] else dim("off"), step_weather),
         ("Screen schedule", screen_summary, step_screen),
+        ("Theme", theme_summary, step_theme),
     ]
     if buttons:
         items.append(("Buttons", lambda g: f"tab = GPIO {g['BUTTON_TAB_GPIO']}, power = GPIO {g['BUTTON_POWER_GPIO']}",

@@ -1,0 +1,64 @@
+/* ───────── Theme template ─────────
+   Copy this folder to themes/<your-theme>/ (lowercase letters, digits, "-"), then change what you
+   like and delete the rest. Every line below shows the built-in value – uncomment to change it.
+   Guide: themes/README.md · Preview: http://127.0.0.1:5000/heute?theme=<your-theme>             */
+
+/* ── All pages ── (a value set here applies to /heute, the week view and the system page) */
+:root {
+  /* --bg: #121317; */                 /* page background (week view: #111) */
+  /* --bg-glow: none; */               /* layers over --bg: gradients or url("bg.jpg") center / cover */
+  /* --text: #f5f5f7; */
+  /* --muted: rgba(245, 245, 247, 0.55); */
+  /* --faint: rgba(245, 245, 247, 0.32); */
+  /* --surface: rgba(255, 255, 255, 0.07); */      /* cards, cells, panels */
+  /* --surface-line: rgba(255, 255, 255, 0.09); */ /* their border */
+  /* --cancelled: #ff5a52; */          /* keep these three recognisable: red / green / blue */
+  /* --changed: #5fe07a; */
+  /* --event: #45c8e0; */
+  /* --homework: #ffcc4d; */
+  /* --font: "Inter", "Noto Sans", sans-serif; */
+  /* --radius: 24px; */
+}
+
+/* ── Only the today view (/heute) ── */
+body.page-heute {
+  /* --surface-now: rgba(255, 255, 255, 0.11); */  /* card of the running lesson */
+  /* --divider: rgba(255, 255, 255, 0.12); */      /* line between parallel courses */
+  /* --warn: #e0a040; */                           /* dot before "Stand HH:MM" */
+}
+
+/* ── Only the week view (/) ── it has its own, simpler look (Arial, grey cells) */
+body.page-woche {
+  /* --bg: #111; */
+  /* --surface: #333; */
+  /* --header-bg: #222; */
+  /* --today: rgb(255, 96, 54); */
+  /* --note: #bbb; */
+  /* --dim: #666; */
+  /* --divider: #555; */
+  /* --error: #ff3333; */                /* "Stundenplan konnte nicht geladen werden" */
+  /* --stale-bg: #5a1a1a; --stale-text: #ffb3b3; */  /* "Untis nicht erreichbar – Stand …" */
+  /* --radius: 15px; */
+  /* --font: Arial, Helvetica, sans-serif; */
+}
+
+/* ── Only the system page (/thermal, both buttons) ── */
+body.page-thermal {
+  /* --series: #8ab4ff; */             /* chart lines */
+  /* --grid: rgba(255, 255, 255, 0.07); */
+  /* --good: #5fe07a; --warn: #f5b942; --crit: #ff5a52; */
+}
+
+/* ── Decoration ──
+   .theme-back sits behind the content, .theme-front in front of it (clicks pass through).
+   Both cover the whole screen and are empty – give them a background or ::before/::after. */
+/*
+.theme-back { background: url("corner.png") right bottom / 400px no-repeat; }
+.theme-front::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 40px;
+                       background: url("garland.png") repeat-x; }
+*/
+
+/* ── Own font (put the file into this folder – no internet needed, nothing is loaded from outside) ──
+@font-face { font-family: "MyFont"; src: url("myfont.woff2") format("woff2"); }
+:root { --font: "MyFont", "Inter", sans-serif; }
+*/

@@ -165,7 +165,9 @@ def test_install_files_trigger_apply(setup, monkeypatch):
     assert g.plan(["install.sh"])["apply"] and g.plan(["system/raspy-web.service"])["apply"]
     p = g.plan(["device/thermal_guard.py", "boot/make_frames.py"])
     assert p["units"] == ["raspy-thermal.service"] and p["next_boot"] and not p["apply"]
-    assert set(g.plan(["app/config.py"])["units"]) == set(rg.RESTART_RULES)
+    # die Diagnose ist eigenständig (nur Standardbibliothek, liest config.env selbst)
+    assert set(g.plan(["app/config.py"])["units"]) == set(rg.RESTART_RULES) - {"raspy-diag.service"}
+    assert set(g.plan(["diag/raspy_diag.py"])["units"]) == {"raspy-diag.service", "raspy-web.service"}
 
 
 def test_boot_repairs_corrupted_files(setup):

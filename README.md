@@ -26,8 +26,12 @@ The display itself is in German (that's where WebUntis is used most); setup and 
 - **Screen schedule** – always on during school hours, off when idle otherwise (or simply always on).
 - Pi extras (all optional): **two hardware buttons** (switch view / hold to shut down),
   **smooth fan curve + overheat protection** (Pi 5), **weekly auto-updates**
-  that are safe to interrupt (off by default), a **custom boot animation**, and a
-  **software watchdog** that installs released versions by itself (see below).
+  that are safe to interrupt (off by default), a **custom boot animation**, a
+  **software watchdog** that installs released versions by itself, and a **diagnostics log**
+  that stays on the Pi (see below).
+- **Design themes** – your own colours, fonts, backgrounds and decoration (a Christmas look,
+  the school's colours …), switched on in the settings or automatically for a season
+  ([how to make one](themes/README.md)).
 
 ## What you need
 
@@ -47,7 +51,7 @@ cd untis-dashboard
 
 The installer asks a few questions and does the rest:
 
-1. **Which extras** you want (buttons, fan control, auto-updates, boot animation).
+1. **Which extras** you want (buttons, fan control, auto-updates, boot animation, watchdog, diagnostics).
 2. **Your school** – type its name and pick it from the list (same search as the Untis app),
    or paste the address of your WebUntis login page.
 3. **Username and password** – tested right away; the password is typed hidden.
@@ -69,6 +73,7 @@ raspy settings
    5  Calendar         on
    6  Weather          Musterstadt
    7  Screen schedule  Mon–Fri 07:30–16:00 on, otherwise off after 10 min idle
+   8  Theme            standard
 
    t  Test the settings
    s  Save and exit
@@ -77,7 +82,7 @@ raspy settings
 
 Nothing is written until you press `s`; then the web server is restarted and the screen schedule applied
 right away. `./install.sh --configure --wizard` walks through every step instead. To add or remove
-extras (buttons, fan, updates, boot animation), run `./install.sh` again.
+extras (buttons, fan, updates, boot animation, watchdog, diagnostics), run `./install.sh` again.
 
 To update: `git pull && ./install.sh`. What changed is in the [changelog](CHANGELOG.md).
 
@@ -154,15 +159,34 @@ hand: `sudo systemctl restart raspy-web`.
 | `WEATHER_LAT`, `WEATHER_LON` | optional; empty = no weather |
 | `SCREEN_SCHEDULE` | `1` = use the screen schedule below, `0` = screen always on |
 | `SCREEN_ON_FROM`, `SCREEN_ON_UNTIL`, `SCREEN_IDLE_OFF` | screen always on Mon–Fri in this window, otherwise off after N seconds idle |
+| `THEME` | design theme: empty = built-in, `auto` = a theme while its season runs, or a theme's folder name ([themes/README.md](themes/README.md)) |
 | `BUTTON_TAB_GPIO`, `BUTTON_POWER_GPIO`, `PORT` | hardware pins, web server port |
 
 Subject colours are in `SUBJECT_COLORS` in `app/dashboard.py`; unknown subjects get a stable colour of their own.
+
+## Design themes
+
+All colours, fonts and roundings of the pages are CSS variables, so a theme is just a folder with a
+`theme.css` that overrides some of them – plus, if you like, pictures, a font, decoration in front of
+or behind the content, and a small `theme.js`. raspy ships without themes; to make one:
+
+```bash
+cp -r themes/_template themes/christmas      # edit theme.json + theme.css
+# look at it: http://127.0.0.1:5000/heute?theme=christmas   (or: app/server.py --demo --theme christmas)
+./install.sh --configure                     # → Theme → Christmas, or "Automatic"
+```
+
+With **Automatic** a theme is active only during the season in its `theme.json` (e.g. `12-01..12-26`)
+and the built-in design otherwise. Your own themes can also live in `~/.config/raspy/themes/`, where
+updates never touch them. Open pages switch by themselves. Full guide, list of variables and tips
+for the Pi: [themes/README.md](themes/README.md).
 
 ## Troubleshooting
 
 ```bash
 journalctl -u raspy-web -f                # web server / Untis errors
 venv/bin/python app/configure.py --check  # test login, class and calendar
+raspy-diag check                          # with the diagnostics extra: check network, Untis, power, SD card …
 ```
 
 - **"Untis-Login abgelehnt"** – wrong username/password, or the account was locked; run `./install.sh --configure`.
@@ -223,16 +247,67 @@ With the watchdog, everything runs from `releases/<version>` – change settings
 `./install.sh --configure` as before (it uses the active version). It can't fix a dying SD card:
 that's what backups are for.
 
+## Diagnostics log (optional)
+
+Problems on a classroom display are often intermittent – the Wi-Fi drops every morning at 7:50,
+the power supply is too weak, someone pulls the plug at night – and by the time someone looks,
+they're gone (Raspberry Pi OS may keep the system journal only in RAM, so it's lost on every reboot).
+The diagnostics extra keeps a small log of such problems **on the Pi itself**. Turn it on with
+`./install.sh` (*Diagnostics log?* → yes); it is off by default.
+
+```bash
+raspy-diag                # overview: open problems, what happened in the last 7 days (and when), tips
+raspy-diag log --days 30  # every entry
+raspy-diag check          # check everything right now
+raspy-diag export         # save a cleaned-up report as a text file (to a USB stick, if one is plugged in)
+sudo raspy-diag clear     # delete the log
+```
+
+It also shows up on the screen: hold **both buttons** for 2 s to open the system page – with the
+extra installed it has a *Diagnose* panel with open problems, the last 7 days (and the usual time
+of day), a tip and the newest entries. It takes the place of the per-core and process lists; the
+overheat protection notes always stay visible. Without the extra the page looks exactly as before.
+
+![System page with the diagnostics panel](docs/thermal-diagnose.png)
+
+What it records – only when something changes, so the SD card isn't worn down:
+network down/back (and weak Wi-Fi signal), Untis/calendar/weather unreachable (with the reason:
+DNS, proxy, timeout, certificate …) or login rejected, under-voltage and throttling, overheating,
+SD card / file system errors and out-of-memory from the kernel log, crashed services, the kiosk
+browser not running, a hanging web server, low disk space, unsynchronised clock, and whether the
+Pi was shut down properly or lost power (with the time of the last sign of life).
+
+**Privacy:**
+
+- **Nothing leaves the Pi.** The service runs with no network access at all (systemd
+  `RestrictAddressFamilies=AF_UNIX`, `IPAddressDeny=any`) – there is no telemetry and no upload.
+  `raspy-diag check`, when you run it, only does a DNS lookup and a TLS handshake with your
+  WebUntis server (the one the display polls anyway).
+- The log holds times, problem types and short error messages – no passwords, usernames,
+  school name, calendar link, student names or timetable content (they are filtered out before
+  writing). It lives in `/var/lib/raspy-diag` (at most ~1 MB, oldest entries drop out), readable
+  only by root and your user.
+- The panel's data (`/api/diag`) is only served to the Pi itself – even with `LAN_ACCESS=1`, other
+  devices on the network get "403 Forbidden", so the log never leaves the room.
+- `raspy-diag export` additionally removes your username, the Pi's name and public IP addresses.
+  The report stays where you saved it – share it only if you want to (read it first).
+- Turning the extra off again (`./install.sh` → no) or `./install.sh --uninstall` deletes the log.
+
+The web server writes the state of its data sources to `/run/raspy/sources.json` (RAM only) –
+that's how the diagnostics know about Untis without going online themselves.
+
 ## Project layout
 
 ```
 app/          Flask server: server.py (app + week view page), week.py (week table), dashboard.py
-              (/heute + all Untis data), thermal.py (/thermal), untis.py (WebUntis client),
+              (/heute + all Untis data), thermal.py (/thermal), themes.py (design themes), untis.py (WebUntis client),
               configure.py (setup), demo.py, templates/, static/
 tests/        pytest suite (python -m pytest), runs in CI together with shellcheck
 device/       runs on the Pi: buttons, overlays, fan/overheat guard, boot splash, kiosk, screen schedule
 system/       systemd units and config templates used by install.sh
 guard/        software watchdog (raspy_guard.py – Python standard library only)
+diag/         diagnostics log (raspy_diag.py – Python standard library only)
+themes/       design themes (none shipped yet): README.md = guide, _template/ = starting point
 boot/         boot animation generator (make_frames.py) and logo
 ```
 

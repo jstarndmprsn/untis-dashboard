@@ -1,32 +1,34 @@
-/* ───────── Thermal-Dashboard – 1920×1080 ───────── */
+/* ───────── Thermal-Dashboard – 1920×1080 ─────────
+   Farben, Schrift und Rundungen als Variablen – ein Design-Theme überschreibt sie (themes/README.md) */
 :root {
   --bg: #121317;
+  --bg-glow:
+    radial-gradient(800px 600px at 90% 10%, rgba(108, 84, 230, 0.22), transparent 62%),
+    radial-gradient(700px 600px at 5% 100%, rgba(24, 150, 170, 0.16), transparent 62%);
   --text: #f5f5f7;
   --muted: rgba(245, 245, 247, 0.58);
   --faint: rgba(245, 245, 247, 0.34);
-  --panel: rgba(255, 255, 255, 0.06);
-  --line: rgba(255, 255, 255, 0.09);
-  --grid: rgba(255, 255, 255, 0.07);
-  --series: #8ab4ff;
+  --surface: rgba(255, 255, 255, 0.06);        /* Kacheln und Panels */
+  --surface-line: rgba(255, 255, 255, 0.09);
+  --grid: rgba(255, 255, 255, 0.07);           /* Raster der Diagramme */
+  --series: #8ab4ff;                           /* Linien der Diagramme */
   --good: #5fe07a;
   --warn: #f5b942;
   --crit: #ff5a52;
+  --font: "Inter", "Noto Sans", sans-serif;
   --radius: 24px;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body {
   width: 1920px; height: 1080px; overflow: hidden;
   background: var(--bg); color: var(--text);
-  font-family: "Inter", "Noto Sans", sans-serif;
+  font-family: var(--font);
   font-feature-settings: "tnum" 1;
   -webkit-font-smoothing: antialiased; cursor: none;
 }
 .bg {
   position: fixed; inset: 0; z-index: -1;
-  background:
-    radial-gradient(800px 600px at 90% 10%, rgba(108, 84, 230, 0.22), transparent 62%),
-    radial-gradient(700px 600px at 5% 100%, rgba(24, 150, 170, 0.16), transparent 62%),
-    var(--bg);
+  background: var(--bg-glow), var(--bg);
 }
 .wrap { height: 100%; padding: 48px 64px; display: flex; flex-direction: column; gap: 32px; }
 
@@ -41,16 +43,16 @@ h1 { font-size: 56px; font-weight: 600; letter-spacing: -1px; }
 .pill {
   display: inline-flex; align-items: center; gap: 12px;
   font-size: 24px; font-weight: 600; padding: 10px 22px; border-radius: 999px;
-  background: var(--panel); border: 2px solid var(--line);
+  background: var(--surface); border: 2px solid var(--surface-line);
 }
 .pill .ic { font-size: 20px; }
-.pill.good { color: var(--good); border-color: rgba(95, 224, 122, .45); }
-.pill.warn { color: var(--warn); border-color: rgba(245, 185, 66, .5); }
-.pill.crit { color: var(--crit); border-color: rgba(255, 90, 82, .6); background: rgba(255, 90, 82, .12); }
+.pill.good { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent); }
+.pill.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, transparent); }
+.pill.crit { color: var(--crit); border-color: color-mix(in srgb, var(--crit) 60%, transparent); background: color-mix(in srgb, var(--crit) 12%, transparent); }
 
 /* Kennzahlen */
 .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; }
-.tile { background: var(--panel); border: 2px solid var(--line); border-radius: var(--radius); padding: 22px 28px; }
+.tile { background: var(--surface); border: 2px solid var(--surface-line); border-radius: var(--radius); padding: 22px 28px; }
 .t-label { font-size: 22px; color: var(--muted); }
 .t-value { font-size: 68px; font-weight: 600; letter-spacing: -1.5px; line-height: 1.1; margin-top: 6px; }
 .t-value small { font-size: 32px; font-weight: 500; color: var(--muted); margin-left: 4px; letter-spacing: 0; }
@@ -61,7 +63,7 @@ h1 { font-size: 56px; font-weight: 600; letter-spacing: -1px; }
 /* Diagramme + Seitenleiste */
 .main { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 520px; gap: 24px; }
 .charts { display: flex; flex-direction: column; gap: 18px; min-height: 0; }
-.chart { flex: 1; min-height: 0; background: var(--panel); border: 2px solid var(--line); border-radius: var(--radius); padding: 16px 24px 10px; display: flex; flex-direction: column; }
+.chart { flex: 1; min-height: 0; background: var(--surface); border: 2px solid var(--surface-line); border-radius: var(--radius); padding: 16px 24px 10px; display: flex; flex-direction: column; }
 .c-title { font-size: 22px; font-weight: 600; margin-bottom: 6px; }
 .c-title span, .p-title span { font-weight: 400; color: var(--faint); font-size: 18px; margin-left: 8px; }
 .chart svg { flex: 1; width: 100%; min-height: 0; overflow: visible; }
@@ -70,7 +72,7 @@ svg .v-label { font-size: 17px; font-weight: 600; fill: var(--text); }
 svg .ref-label { font-size: 14px; }
 
 .side { display: flex; flex-direction: column; gap: 18px; min-height: 0; }
-.panel { background: var(--panel); border: 2px solid var(--line); border-radius: var(--radius); padding: 18px 24px; }
+.panel { background: var(--surface); border: 2px solid var(--surface-line); border-radius: var(--radius); padding: 18px 24px; }
 .p-title { font-size: 22px; font-weight: 600; margin-bottom: 12px; }
 
 .cores { display: flex; flex-direction: column; gap: 10px; }
@@ -90,3 +92,44 @@ svg .ref-label { font-size: 14px; }
 .note.good .ic { color: var(--good); }
 .note.warn .ic { color: var(--warn); } .note.warn { color: var(--text); }
 .note.crit .ic { color: var(--crit); } .note.crit { color: var(--crit); font-weight: 600; }
+
+/* Diagnose-Panel (nur mit dem Diagnose-Extra) */
+.diag { display: flex; flex-direction: column; gap: 8px; }
+.diag .p-title { margin-bottom: 4px; }
+#diag { display: flex; flex-direction: column; gap: 8px; font-size: 19px; color: var(--muted); }
+.d-row { display: grid; grid-template-columns: 20px 1fr auto; gap: 10px; align-items: baseline; color: var(--text); line-height: 1.3; }
+.d-row .ic { text-align: center; }
+.d-row.good .ic { color: var(--good); } .d-row.good { color: var(--muted); }
+.d-row.warn .ic { color: var(--warn); }
+.d-row.crit .ic, .d-row.crit .d-msg { color: var(--crit); } .d-row.crit .d-msg { font-weight: 600; }
+.d-row.info .ic { color: var(--faint); }
+.d-meta { color: var(--faint); font-size: 17px; white-space: nowrap; }
+.d-msg { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.d-head { font-size: 16px; text-transform: uppercase; letter-spacing: 1px; color: var(--faint); margin-top: 6px; }
+.d-sum { display: grid; grid-template-columns: 44px 1fr; gap: 8px; align-items: baseline; line-height: 1.3; }
+.d-sum b { color: var(--warn); font-weight: 600; text-align: right; }
+.d-sum em { display: block; font-style: normal; font-size: 17px; color: var(--faint); }
+.d-sum .d-msg { -webkit-line-clamp: 3; color: var(--text); }
+.d-none { color: var(--good); }
+.d-tip { font-size: 18px; color: var(--text); background: color-mix(in srgb, var(--series) 10%, transparent); border-radius: 12px; padding: 8px 12px;
+         line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.d-log { display: grid; grid-template-columns: 82px 1fr; gap: 8px; font-size: 17px; line-height: 1.3; }
+.d-log span:first-child { color: var(--faint); white-space: nowrap; }
+.d-log .d-msg { -webkit-line-clamp: 1; }
+
+/* mit Diagnose: das Panel bekommt den Platz von Kernen und Prozessen (CPU-Kachel und -Kurve bleiben),
+   "Schutz & Hinweise" bleibt immer ganz zu sehen. Reicht der Platz nicht, fallen unten die ältesten
+   Einträge weg (ausgeblendet statt abgeschnitten). */
+.panel[hidden] { display: none; }
+.with-diag .side > .panel:not(.diag):not(.hints) { display: none; }
+.with-diag .diag { flex: 1; min-height: 0; overflow: hidden; }
+.with-diag .hints { flex: none; }
+.with-diag .notes { gap: 6px; font-size: 18px; }
+.d-log.cut { display: none; }
+
+/* Deko-Ebenen für Design-Themes (ohne Theme leer und unsichtbar):
+   .theme-back hinter dem Inhalt (über dem Hintergrund), .theme-front davor (z. B. Schneefall) –
+   beide lassen Klicks durch. Siehe themes/README.md */
+.theme-back, .theme-front { position: fixed; inset: 0; pointer-events: none; }
+.theme-back { z-index: -1; }
+.theme-front { z-index: 1000; }

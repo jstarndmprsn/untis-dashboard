@@ -4,10 +4,12 @@
 <meta charset="UTF-8">
 <meta name="google" content="notranslate">
 <title>System</title>
-<link rel="stylesheet" href="/static/thermal.css?v=1">
+<link rel="stylesheet" href="/static/thermal.css?v=3">
+{% set th = theme_for("thermal") %}{% if th %}<link rel="stylesheet" href="{{ th.css }}">{% endif %}
 </head>
-<body>
+<body class="page-thermal{% if th %} theme-{{ th.id }}{% endif %}">
 <div class="bg"></div>
+{% if th %}<div class="theme-back" aria-hidden="true"></div>{% endif %}
 <main class="wrap">
   <header class="top">
     <div class="top-left">
@@ -34,6 +36,11 @@
       <div class="chart"><div class="c-title">Lüfter <span>U/min · letzte 15 min</span></div><svg id="c-rpm"></svg></div>
     </div>
     <aside class="side">
+      <!-- nur mit dem Diagnose-Extra sichtbar (Daten: /api/diag, dieselbe Auswertung wie "raspy-diag") -->
+      <div class="panel diag" id="diag-panel" hidden>
+        <div class="p-title">Diagnose <span>Protokoll auf diesem Pi</span></div>
+        <div id="diag"></div>
+      </div>
       <div class="panel">
         <div class="p-title">Kerne</div>
         <div id="cores" class="cores"></div>
@@ -42,13 +49,15 @@
         <div class="p-title">Prozesse <span>CPU %</span></div>
         <div id="procs" class="procs"></div>
       </div>
-      <div class="panel">
+      <div class="panel hints">
         <div class="p-title">Schutz &amp; Hinweise</div>
         <div id="notes" class="notes"></div>
       </div>
     </aside>
   </section>
 </main>
-<script src="/static/thermal.js?v=2"></script>
+{% if th %}<div class="theme-front" aria-hidden="true"></div>{% endif %}
+<script src="/static/thermal.js?v=3"></script>
+{% if th and th.js %}<script src="{{ th.js }}"></script>{% endif %}
 </body>
 </html>

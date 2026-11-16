@@ -73,8 +73,8 @@ setting() {  # Wert aus config.env (ohne Anführungszeichen)
 # shellcheck source=/dev/null
 load_state() { if [ -f "$STATE" ]; then . "$STATE"; fi; }
 save_state() {
-  printf 'F_BUTTONS=%s\nF_FAN=%s\nF_UPDATES=%s\nF_BOOT=%s\nF_GUARD=%s\n' \
-    "$F_BUTTONS" "$F_FAN" "$F_UPDATES" "$F_BOOT" "$F_GUARD" > "$STATE"
+  printf 'F_BUTTONS=%s\nF_FAN=%s\nF_UPDATES=%s\nF_BOOT=%s\nF_GUARD=%s\nF_DIAG=%s\n' \
+    "$F_BUTTONS" "$F_FAN" "$F_UPDATES" "$F_BOOT" "$F_GUARD" "$F_DIAG" > "$STATE"
 }
 
 unit_on()  { sudo systemctl daemon-reload; sudo systemctl enable "$@" >/dev/null 2>&1; }
@@ -88,7 +88,7 @@ command -v apt-get >/dev/null || die "This installer needs Raspberry Pi OS / Deb
 MODEL="$( { tr -d '\0' < /proc/device-tree/model; } 2>/dev/null || echo "unknown device")"
 IS_PI=n;  [[ $MODEL == Raspberry\ Pi* ]] && IS_PI=y
 IS_PI5=n; [[ $MODEL == Raspberry\ Pi\ 5* ]] && IS_PI5=y
-F_BUTTONS="" F_FAN="" F_SCREEN="" F_UPDATES="" F_BOOT="" F_GUARD=""
+F_BUTTONS="" F_FAN="" F_SCREEN="" F_UPDATES="" F_BOOT="" F_GUARD="" F_DIAG=""
 load_state
 
 # ───────────────────────── features: install / remove ─────────────────────────
@@ -261,6 +261,22 @@ remove_guard() {
   sudo rm -rf /usr/local/sbin/raspy-guard /usr/local/bin/raspy-guard /usr/local/lib/raspy-guard /etc/raspy-guard.conf
 }
 
+install_diag() {
+  say "Diagnostics log"
+  # Protokoll gehört root, lesbar für dich (Gruppe) – sonst für niemanden
+  sudo install -d -m 750 -o root -g "$(id -gn)" /var/lib/raspy-diag
+  put "$DIR/system/raspy-diag.service" /etc/systemd/system/raspy-diag.service 644
+  put "$DIR/system/raspy-diag" /usr/local/bin/raspy-diag 755
+  unit_on raspy-diag.service
+  sudo systemctl restart raspy-diag.service
+  ok "raspy-diag.service – records problems on this Pi only, has no network access"
+  ok "Overview: raspy-diag · check now: raspy-diag check · report: raspy-diag export"
+}
+remove_diag() {   # beim Abwählen auch das Protokoll löschen – es soll nichts liegen bleiben
+  unit_off raspy-diag.service
+  sudo rm -rf /usr/local/bin/raspy-diag /var/lib/raspy-diag
+}
+
 install_boot() {
   say "Boot animation"
   local tmp wd=() ver; tmp=$(mktemp -d)
@@ -357,7 +373,7 @@ if [ "${1:-}" = "--uninstall" ]; then
   say "Uninstall raspy"
   ask_yn "Remove all raspy services and system changes from this Pi?" n || exit 0
   need_sudo
-  remove_guard; remove_boot; remove_updates; remove_screen; remove_fan; remove_buttons; remove_kiosk
+  remove_diag; remove_guard; remove_boot; remove_updates; remove_screen; remove_fan; remove_buttons; remove_kiosk
   unit_off raspy-web.service
   sudo rm -f /etc/sudoers.d/raspy /etc/tmpfiles.d/raspy.conf
   rm -f "$STATE"
@@ -401,6 +417,7 @@ else
   ask_yn "Custom boot animation (changes boot settings – advanced)?" "$(def "$F_BOOT" n)" && F_BOOT=y || F_BOOT=n
 fi
 ask_yn "Software watchdog (installs released versions automatically in your time windows, repairs damaged program files at boot)?" "$(def "$F_GUARD" n)" && F_GUARD=y || F_GUARD=n
+ask_yn "Diagnostics log (records problems like Wi-Fi drops or low voltage on this Pi only – nothing is ever sent anywhere)?" "$(def "$F_DIAG" n)" && F_DIAG=y || F_DIAG=n
 [ "$IS_PI" = y ] || [ "$F_BUTTONS$F_BOOT" = nn ] || warn "This does not look like a Raspberry Pi – buttons/boot animation may not work."
 
 say "Packages"
@@ -466,6 +483,7 @@ if [ "$KEEP_BOOT" = y ]; then say "Boot animation"; ok "Left unchanged (--keep-b
 elif [ "$F_BOOT" = y ]; then install_boot
 else remove_boot; fi
 if [ "$F_GUARD" = y ]; then install_guard; else remove_guard; fi
+if [ "$F_DIAG" = y ];  then install_diag;  else remove_diag; fi
 [ "$F_BUTTONS$F_FAN$F_UPDATES" = nnn ] && sudo rm -f /etc/sudoers.d/raspy
 
 PORT=$(setting PORT); PORT=${PORT:-5000}
@@ -477,6 +495,9 @@ else
 fi
 echo "  Change settings later:     ./install.sh --configure"
 echo "  Logs:                      journalctl -u raspy-web -f"
+if [ "$F_DIAG" = y ]; then
+  echo "  Diagnostics:               raspy-diag   (check now: raspy-diag check)"
+fi
 if [ "$F_GUARD" = y ]; then
   echo "  Updates:                   tag a release (git tag v1.2.0 && git push --tags) – the watchdog installs it"
   echo "                             in your time window; right away: sudo raspy-guard update-now"

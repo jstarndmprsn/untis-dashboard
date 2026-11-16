@@ -25,7 +25,9 @@ import recurring_ical_events
 import requests
 from flask import jsonify, render_template, request
 
+import config
 import demo
+import themes
 import untis
 
 # ------------------ KONFIGURATION ------------------
@@ -170,6 +172,7 @@ class Source:
         else:
             delay = min(60, self.interval, RETRY_DELAYS[min(self.failures, len(RETRY_DELAYS)) - 1])
         self.next_run = time.time() + delay
+        write_sources_state()
 
     def loop(self):
         while True:
@@ -583,6 +586,27 @@ def source_status(src):
     }
 
 
+# Zustand der Quellen für die Diagnose (raspy-diag liest ihn, ohne selbst ins Netz zu gehen).
+# Liegt in /run/raspy (RAM) – keine Schreibzugriffe auf die SD-Karte. Im Demo-Modus nicht
+# (der Probelauf des Software-Wächters soll den echten Zustand nicht überschreiben).
+_state = {"path": None, "lock": threading.Lock()}
+
+
+def write_sources_state():
+    path = _state["path"]
+    if not path:
+        return
+    data = {"updated": time.time(), "started": _STARTED,
+            "sources": {k: source_status(v) for k, v in _sources.items()}}
+    with _state["lock"]:
+        try:
+            with open(path + ".tmp", "w", encoding="utf-8") as f:
+                json.dump(data, f)
+            os.replace(path + ".tmp", path)
+        except OSError:
+            pass
+
+
 # ------------------ HINWEIS VON AUSSEN (STATUS_FILE) ------------------
 NOTICE_MAX_AGE = 180     # älter = Schreiber läuft nicht mehr -> Hinweis ausblenden
 NOTICE_MAX_LEN = 120
@@ -633,6 +657,7 @@ def init(app, cfg, master):
     _sources["untis"] = Source("Untis", UNTIS_INTERVAL, UntisFetcher(cfg, master))
     _master["data"] = master
     _notice["path"] = (cfg.get("STATUS_FILE") or "").strip()
+    _state["path"] = None if config.demo(cfg) else os.path.join(config.run_dir(), "sources.json")
     # Kalender und Wetter sind optional: ohne Eintrag in config.env gibt es die Quelle nicht
     if cfg["CALENDAR_ICS_URL"].strip():
         fetch = CalendarFetcher(cfg["CALENDAR_ICS_URL"].strip(), cfg["CALENDAR_COLORS"])
@@ -699,6 +724,7 @@ def init(app, cfg, master):
             "features": {"calendar": "calendar" in _sources, "weather": "weather" in _sources},
             "status": {k: source_status(v) for k, v in _sources.items()},
             "notice": read_notice(_notice["path"]),
+            "theme": themes.key_for("heute"),
         })
 
 

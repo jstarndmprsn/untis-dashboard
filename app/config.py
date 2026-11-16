@@ -33,6 +33,7 @@ DEFAULTS = {
     "STATUS_FILE": "",           # optional: Hinweis eines anderen Programms in der Statuszeile von /heute
     "GUARD_WINDOWS": "",         # Software-Wächter: Zeitfenster für Updates, z. B. "Di,Do 11:35-11:50; Mo-Fr 16:15-18:00"
     "GUARD_APT": "0",            # 1 = auch die System-Updates (apt) in diese Zeitfenster legen
+    "THEME": "",                 # Design-Theme: leer = Standard, "auto" = nach Zeitraum, sonst Ordnername in themes/
     "DEMO": "0",                 # 1 = erfundene Beispieldaten statt Untis (zum Ausprobieren)
 }
 

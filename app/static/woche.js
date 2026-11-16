@@ -16,9 +16,9 @@ function updateClock() {
 
 async function refresh() {
   try {
-    const r = await fetch("/content", { cache: "no-store" });
+    const r = await fetch("/content" + location.search, { cache: "no-store" });   // ?theme=… (Vorschau) mitgeben
     if (!r.ok) return;
-    // neue Server-Version eingespielt -> einmal komplett neu laden (neues CSS/JS)
+    // neue Server-Version eingespielt oder anderes Theme -> einmal komplett neu laden (neues CSS/JS)
     if (r.headers.get("X-Version") !== VERSION) { location.reload(); return; }
     const html = await r.text();
     if (html !== last) {

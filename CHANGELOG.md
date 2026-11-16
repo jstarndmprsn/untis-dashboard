@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+### Added – design themes
+
+- **Ready for themes** (a Christmas look, school colours …): a theme is a folder `themes/<name>/`
+  with a `theme.css` that overrides the pages' CSS variables, optionally pictures, fonts,
+  decoration layers in front of/behind the content and a `theme.js`. Guide and a template to copy:
+  [themes/README.md](themes/README.md), `themes/_template/`. No theme is shipped yet.
+- Choose it in `./install.sh --configure` → **Theme** (`THEME` in `config.env`): built-in, a theme,
+  or **Automatic** – a theme only during the season in its `theme.json` (e.g. `12-01..12-26`).
+- Preview any theme without changing settings: `/heute?theme=<name>` (also `/` and `/thermal`),
+  or `app/server.py --demo --theme <name>`. Open pages reload by themselves when the theme changes.
+- Own themes can live in `~/.config/raspy/themes/` – untouched by `git pull` and the watchdog.
+- All colours of the today view, week view and system page are now CSS variables with the same
+  names on every page (`--bg`, `--text`, `--surface`, `--cancelled` …). Without a theme every page
+  looks exactly as before (checked pixel by pixel).
+
+### Added – diagnostics log (opt-in extra in `./install.sh`, off by default)
+
+- **Keeps a small log of problems on the Pi itself** – Wi-Fi drops, Untis/calendar/weather
+  unreachable (with the reason), login rejected, under-voltage and throttling, overheating,
+  SD card and file system errors, crashed services, kiosk browser gone, low disk space,
+  unsynchronised clock, and power loss without shutdown (with the last sign of life).
+  Only changes are written (a few KB per week), so the SD card isn't worn down.
+- `raspy-diag` shows open problems, what happened in the last 7 days and at which time of day it
+  usually happens, with tips; `raspy-diag check` checks everything right now; `raspy-diag export`
+  saves a cleaned-up text report (to a USB stick if one is plugged in); `sudo raspy-diag clear`
+  deletes the log.
+- **Nothing is sent anywhere:** the service has no network access (enforced by systemd). Passwords,
+  usernames, school, calendar link and coordinates are filtered out before anything is written.
+  Turning the extra off deletes the log.
+- Python standard library only, so it keeps working when the Python environment is broken.
+  The web server now writes the state of its data sources to `/run/raspy/sources.json` (RAM).
+- **On the screen, too:** the system page (hold both buttons) gets a *Diagnose* panel – open
+  problems, the last 7 days with the usual time of day, a tip and the newest entries, without a
+  laptop or SSH. Its data (`/api/diag`) is only served to the Pi itself, even with `LAN_ACCESS=1`.
+  Without the extra the page is unchanged.
+
 ### Added – calendar colours in the settings
 
 - **Event colours can be changed** in `./install.sh --configure` → *Event colours* or with

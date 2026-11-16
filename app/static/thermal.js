@@ -1,10 +1,12 @@
 // Thermal-Dashboard: holt alle 2 s /api/thermal und zeichnet Kennzahlen + Verläufe.
+// Mit dem Diagnose-Extra zusätzlich alle 30 s /api/diag (Panel "Diagnose").
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const pad = (n) => String(n).padStart(2, "0");
 const NS = "http://www.w3.org/2000/svg";
 const WINDOW_S = 15 * 60;
+let diag = null;   // letzte Antwort von /api/diag
 
 function tickClock() {
   const d = new Date();
@@ -76,6 +78,7 @@ function statusOf(d) {
   if (g.alive && g.fan_mode === "software") notes.push(["good", "●", "Lüfter: stufenlose Kurve (Kernel-Notfallkurve ab 82 °C)"]);
   else { bump("warn"); notes.push(["warn", "▲", "Lüfter nur über Kernel-Notfallkurve gesteuert"]); }
   if (th && !th.now.length && !th.since_boot.length) notes.push(["good", "●", "Keine Drosselung oder Unterspannung"]);
+  if (diag && diag.enabled && diag.open.some((p) => p.lvl !== "info")) bump("warn");
   return { level, notes };
 }
 
@@ -121,6 +124,67 @@ function render(d) {
       <div class="bar"><i style="width:${Math.max(1, v)}%"></i></div><b>${Math.round(v)} %</b></div>`).join("");
   $("procs").innerHTML = d.procs.map((p) => `<div class="proc"><span>${esc(p.name)}</span><span>${p.cpu.toFixed(1)}</span></div>`).join("");
   $("notes").innerHTML = notes.map(([l, i, t]) => `<div class="note ${l}"><span class="ic">${i}</span><span>${esc(t)}</span></div>`).join("");
+  if (diag && diag.enabled) fitDiag();   // Hinweise können wachsen -> Diagnose-Panel neu einpassen
+}
+
+// ── Diagnose-Panel ──
+const DIAG_IC = { err: ["crit", "■"], warn: ["warn", "▲"], info: ["info", "●"] };
+
+function diagRow(lvl, text, meta) {
+  const [cls, ic] = DIAG_IC[lvl] || DIAG_IC.info;
+  return `<div class="d-row ${cls}"><span class="ic">${ic}</span><span class="d-msg">${esc(text)}</span>` +
+    (meta ? `<span class="d-meta">${esc(meta)}</span>` : "") + `</div>`;
+}
+
+function renderDiag(d) {
+  diag = d;
+  const panel = $("diag-panel");
+  panel.hidden = !d.enabled;
+  document.body.classList.toggle("with-diag", !!d.enabled);
+  if (!d.enabled) return;
+  let h = "";
+  if (!d.alive_ok) h += diagRow("warn", "Diagnose-Dienst läuft nicht", "");
+  if (d.open.length) h += d.open.map((p) => diagRow(p.lvl, p.msg, "seit " + p.when)).join("");
+  else h += `<div class="d-row good"><span class="ic">●</span><span class="d-msg">Gerade keine Probleme</span></div>`;
+
+  h += `<div class="d-head">Letzte 7 Tage</div>`;
+  h += d.summary.length
+    ? d.summary.map((s) => `<div class="d-sum"><b>${s.count}×</b><span class="d-msg">${esc(s.msg)}` +
+        (s.extra ? `<em>${esc(s.extra)}</em>` : "") + `</span></div>`).join("")
+    : `<div class="d-none">keine Probleme</div>`;
+  if (d.tip) h += `<div class="d-tip">→ ${esc(d.tip)}</div>`;
+
+  if (d.recent.length) {
+    h += `<div class="d-head log">Letzte Einträge</div>`;
+    h += d.recent.map((e) => `<div class="d-log"><span>${esc(e.when)}${e.unsynced ? "?" : ""}</span>` +
+      `<span class="d-msg">${esc(e.msg)}</span></div>`).join("");
+  }
+  $("diag").innerHTML = h;
+  fitDiag();
+}
+
+// So viele der neuesten Einträge zeigen, wie in die Spalte passen (keine halb abgeschnittenen Zeilen)
+function fitDiag() {
+  const panel = $("diag-panel");
+  const logs = [...panel.querySelectorAll(".d-log")];      // neueste zuerst
+  const head = panel.querySelector(".d-head.log");
+  const fits = () => panel.scrollHeight <= panel.clientHeight + 1;
+  logs.forEach((l) => l.classList.add("cut"));
+  if (head) head.hidden = false;
+  let shown = 0;
+  for (const l of logs) {
+    l.classList.remove("cut");
+    if (!fits()) { l.classList.add("cut"); break; }
+    shown++;
+  }
+  if (head && !shown) head.hidden = true;
+}
+
+async function refreshDiag() {
+  try {
+    const r = await fetch("/api/diag", { cache: "no-store" });
+    renderDiag(r.ok ? await r.json() : { enabled: false });
+  } catch (e) { /* Server kurz weg -> alten Stand behalten */ }
 }
 
 async function refresh() {
@@ -131,6 +195,7 @@ async function refresh() {
 }
 
 tickClock();
-refresh();
+refreshDiag().then(refresh);
 setInterval(tickClock, 1000);
 setInterval(refresh, 2000);
+setInterval(refreshDiag, 30000);

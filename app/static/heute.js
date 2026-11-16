@@ -220,6 +220,8 @@ async function refresh() {
     if (txt !== lastJson) {
       lastJson = txt;
       data = JSON.parse(txt);
+      // anderes Design-Theme aktiv (Einstellung, Zeitraum, Dateien geändert) -> neu laden
+      if (data.theme !== undefined && data.theme !== document.body.dataset.theme) { location.reload(); return; }
       simOffset = data.preview ? Date.parse(data.now) - Date.now() : 0;
       tickClock();
       render();
